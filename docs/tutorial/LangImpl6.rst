@@ -1,6 +1,6 @@
-============================================================
-Kaleidoscope: Extending the Language: User-defined Operators
-============================================================
+==================================================
+Kaleidoscope: Extending the Language: Control Flow
+==================================================
 
 .. contents::
    :local:
@@ -9,734 +9,764 @@ Chapter 6 Introduction
 ======================
 
 Welcome to Chapter 6 of the "`Implementing a language with
-LLVM <index.html>`_" tutorial. At this point in our tutorial, we now
-have a fully functional language that is fairly minimal, but also
-useful. There is still one big problem with it, however. Our language
-doesn't have many useful operators (like division, logical negation, or
-even any comparisons besides less-than).
+LLVM <index.html>`_" tutorial. Parts 1-4 described the implementation of
+the simple Kaleidoscope language and included support for generating
+LLVM IR, followed by optimizations and a JIT compiler. Unfortunately, as
+presented, Kaleidoscope is mostly useless: it has no control flow other
+than call and return. This means that you can't have conditional
+branches in the code, significantly limiting its power. In this episode
+of "build that compiler", we'll extend Kaleidoscope to have an
+if/then/else expression plus a simple 'for' loop.
 
-This chapter of the tutorial takes a wild digression into adding
-user-defined operators to the simple and beautiful Kaleidoscope
-language. This digression now gives us a simple and ugly language in
-some ways, but also a powerful one at the same time. One of the great
-things about creating your own language is that you get to decide what
-is good or bad. In this tutorial we'll assume that it is okay to use
-this as a way to show some interesting parsing techniques.
+If/Then/Else
+============
 
-At the end of this tutorial, we'll run through an example Kaleidoscope
-application that `renders the Mandelbrot set <#kicking-the-tires>`_. This gives an
-example of what you can build with Kaleidoscope and its feature set.
+Extending Kaleidoscope to support if/then/else is quite straightforward.
+It basically requires adding support for this "new" concept to the
+lexer, parser, AST, and LLVM code emitter. This example is nice, because
+it shows how easy it is to "grow" a language over time, incrementally
+extending it as new ideas are discovered.
 
-User-defined Operators: the Idea
-================================
-
-The "operator overloading" that we will add to Kaleidoscope is more
-general than languages like C++. In C++, you are only allowed to
-redefine existing operators: you can't programatically change the
-grammar, introduce new operators, change precedence levels, etc. In this
-chapter, we will add this capability to Kaleidoscope, which will let the
-user round out the set of operators that are supported.
-
-The point of going into user-defined operators in a tutorial like this
-is to show the power and flexibility of using a hand-written parser.
-Thus far, the parser we have been implementing uses recursive descent
-for most parts of the grammar and operator precedence parsing for the
-expressions. See `Chapter 2 <LangImpl2.html>`_ for details. Without
-using operator precedence parsing, it would be very difficult to allow
-the programmer to introduce new operators into the grammar: the grammar
-is dynamically extensible as the JIT runs.
-
-The two specific features we'll add are programmable unary operators
-(right now, Kaleidoscope has no unary operators at all) as well as
-binary operators. An example of this is:
+Before we get going on "how" we add this extension, lets talk about
+"what" we want. The basic idea is that we want to be able to write this
+sort of thing:
 
 ::
 
-    # Logical unary not.
-    def unary!(v)
-      if v then
-        0
-      else
-        1;
-
-    # Define > with the same precedence as <.
-    def binary> 10 (LHS RHS)
-      RHS < LHS;
-
-    # Binary "logical or", (note that it does not "short circuit")
-    def binary| 5 (LHS RHS)
-      if LHS then
-        1
-      else if RHS then
+    def fib(x)
+      if x < 3 then
         1
       else
-        0;
+        fib(x-1)+fib(x-2);
 
-    # Define = with slightly lower precedence than relationals.
-    def binary= 9 (LHS RHS)
-      !(LHS < RHS | LHS > RHS);
+In Kaleidoscope, every construct is an expression: there are no
+statements. As such, the if/then/else expression needs to return a value
+like any other. Since we're using a mostly functional form, we'll have
+it evaluate its conditional, then return the 'then' or 'else' value
+based on how the condition was resolved. This is very similar to the C
+"?:" expression.
 
-Many languages aspire to being able to implement their standard runtime
-library in the language itself. In Kaleidoscope, we can implement
-significant parts of the language in the library!
+The semantics of the if/then/else expression is that it evaluates the
+condition to a boolean equality value: 0.0 is considered to be false and
+everything else is considered to be true. If the condition is true, the
+first subexpression is evaluated and returned, if the condition is
+false, the second subexpression is evaluated and returned. Since
+Kaleidoscope allows side-effects, this behavior is important to nail
+down.
 
-We will break down implementation of these features into two parts:
-implementing support for user-defined binary operators and adding unary
-operators.
+Now that we know what we "want", lets break this down into its
+constituent pieces.
 
-User-defined Binary Operators
-=============================
+Lexer Extensions for If/Then/Else
+---------------------------------
 
-Adding support for user-defined binary operators is pretty simple with
-our current framework. We'll first add support for the unary/binary
-keywords:
+The lexer extensions are straightforward. First we add new enum values
+for the relevant tokens:
 
 .. code-block:: c++
 
-    enum Token {
-      ...
-      // operators
-      tok_binary = -11,
-      tok_unary = -12
-    };
-    ...
-    static int gettok() {
-    ...
-        if (IdentifierStr == "for")
-          return tok_for;
-        if (IdentifierStr == "in")
-          return tok_in;
-        if (IdentifierStr == "binary")
-          return tok_binary;
-        if (IdentifierStr == "unary")
-          return tok_unary;
+      // control
+      tok_if = -6,
+      tok_then = -7,
+      tok_else = -8,
+
+Once we have that, we recognize the new keywords in the lexer. This is
+pretty simple stuff:
+
+.. code-block:: c++
+
+        ...
+        if (IdentifierStr == "def")
+          return tok_def;
+        if (IdentifierStr == "extern")
+          return tok_extern;
+        if (IdentifierStr == "if")
+          return tok_if;
+        if (IdentifierStr == "then")
+          return tok_then;
+        if (IdentifierStr == "else")
+          return tok_else;
         return tok_identifier;
 
-This just adds lexer support for the unary and binary keywords, like we
-did in `previous chapters <LangImpl5.html#lexer-extensions-for-if-then-else>`_. One nice thing
-about our current AST, is that we represent binary operators with full
-generalisation by using their ASCII code as the opcode. For our extended
-operators, we'll use this same representation, so we don't need any new
-AST or parser support.
+AST Extensions for If/Then/Else
+-------------------------------
 
-On the other hand, we have to be able to represent the definitions of
-these new operators, in the "def binary\| 5" part of the function
-definition. In our grammar so far, the "name" for the function
-definition is parsed as the "prototype" production and into the
-``PrototypeAST`` AST node. To represent our new user-defined operators
-as prototypes, we have to extend the ``PrototypeAST`` AST node like
-this:
+To represent the new expression we add a new AST node for it:
 
 .. code-block:: c++
 
-    /// PrototypeAST - This class represents the "prototype" for a function,
-    /// which captures its argument names as well as if it is an operator.
-    class PrototypeAST {
-      std::string Name;
-      std::vector<std::string> Args;
-      bool IsOperator;
-      unsigned Precedence;  // Precedence if a binary op.
+    /// IfExprAST - Expression class for if/then/else.
+    class IfExprAST : public ExprAST {
+      std::unique_ptr<ExprAST> Cond, Then, Else;
 
     public:
-      PrototypeAST(const std::string &name, std::vector<std::string> Args,
-                   bool IsOperator = false, unsigned Prec = 0)
-      : Name(name), Args(std::move(Args)), IsOperator(IsOperator),
-        Precedence(Prec) {}
-
-      bool isUnaryOp() const { return IsOperator && Args.size() == 1; }
-      bool isBinaryOp() const { return IsOperator && Args.size() == 2; }
-
-      char getOperatorName() const {
-        assert(isUnaryOp() || isBinaryOp());
-        return Name[Name.size()-1];
-      }
-
-      unsigned getBinaryPrecedence() const { return Precedence; }
-
-      Function *codegen();
-    };
-
-Basically, in addition to knowing a name for the prototype, we now keep
-track of whether it was an operator, and if it was, what precedence
-level the operator is at. The precedence is only used for binary
-operators (as you'll see below, it just doesn't apply for unary
-operators). Now that we have a way to represent the prototype for a
-user-defined operator, we need to parse it:
-
-.. code-block:: c++
-
-    /// prototype
-    ///   ::= id '(' id* ')'
-    ///   ::= binary LETTER number? (id, id)
-    static std::unique_ptr<PrototypeAST> ParsePrototype() {
-      std::string FnName;
-
-      unsigned Kind = 0;  // 0 = identifier, 1 = unary, 2 = binary.
-      unsigned BinaryPrecedence = 30;
-
-      switch (CurTok) {
-      default:
-        return ErrorP("Expected function name in prototype");
-      case tok_identifier:
-        FnName = IdentifierStr;
-        Kind = 0;
-        getNextToken();
-        break;
-      case tok_binary:
-        getNextToken();
-        if (!isascii(CurTok))
-          return ErrorP("Expected binary operator");
-        FnName = "binary";
-        FnName += (char)CurTok;
-        Kind = 2;
-        getNextToken();
-
-        // Read the precedence if present.
-        if (CurTok == tok_number) {
-          if (NumVal < 1 || NumVal > 100)
-            return ErrorP("Invalid precedecnce: must be 1..100");
-          BinaryPrecedence = (unsigned)NumVal;
-          getNextToken();
-        }
-        break;
-      }
-
-      if (CurTok != '(')
-        return ErrorP("Expected '(' in prototype");
-
-      std::vector<std::string> ArgNames;
-      while (getNextToken() == tok_identifier)
-        ArgNames.push_back(IdentifierStr);
-      if (CurTok != ')')
-        return ErrorP("Expected ')' in prototype");
-
-      // success.
-      getNextToken();  // eat ')'.
-
-      // Verify right number of names for operator.
-      if (Kind && ArgNames.size() != Kind)
-        return ErrorP("Invalid number of operands for operator");
-
-      return llvm::make_unique<PrototypeAST>(FnName, std::move(ArgNames), Kind != 0,
-                                             BinaryPrecedence);
-    }
-
-This is all fairly straightforward parsing code, and we have already
-seen a lot of similar code in the past. One interesting part about the
-code above is the couple lines that set up ``FnName`` for binary
-operators. This builds names like "binary@" for a newly defined "@"
-operator. This then takes advantage of the fact that symbol names in the
-LLVM symbol table are allowed to have any character in them, including
-embedded nul characters.
-
-The next interesting thing to add, is codegen support for these binary
-operators. Given our current structure, this is a simple addition of a
-default case for our existing binary operator node:
-
-.. code-block:: c++
-
-    Value *BinaryExprAST::codegen() {
-      Value *L = LHS->codegen();
-      Value *R = RHS->codegen();
-      if (!L || !R)
-        return nullptr;
-
-      switch (Op) {
-      case '+':
-        return Builder.CreateFAdd(L, R, "addtmp");
-      case '-':
-        return Builder.CreateFSub(L, R, "subtmp");
-      case '*':
-        return Builder.CreateFMul(L, R, "multmp");
-      case '<':
-        L = Builder.CreateFCmpULT(L, R, "cmptmp");
-        // Convert bool 0/1 to double 0.0 or 1.0
-        return Builder.CreateUIToFP(L, Type::getDoubleTy(getGlobalContext()),
-                                    "booltmp");
-      default:
-        break;
-      }
-
-      // If it wasn't a builtin binary operator, it must be a user defined one. Emit
-      // a call to it.
-      Function *F = TheModule->getFunction(std::string("binary") + Op);
-      assert(F && "binary operator not found!");
-
-      Value *Ops[2] = { L, R };
-      return Builder.CreateCall(F, Ops, "binop");
-    }
-
-As you can see above, the new code is actually really simple. It just
-does a lookup for the appropriate operator in the symbol table and
-generates a function call to it. Since user-defined operators are just
-built as normal functions (because the "prototype" boils down to a
-function with the right name) everything falls into place.
-
-The final piece of code we are missing, is a bit of top-level magic:
-
-.. code-block:: c++
-
-    Function *FunctionAST::codegen() {
-      NamedValues.clear();
-
-      Function *TheFunction = Proto->codegen();
-      if (!TheFunction)
-        return nullptr;
-
-      // If this is an operator, install it.
-      if (Proto->isBinaryOp())
-        BinopPrecedence[Proto->getOperatorName()] = Proto->getBinaryPrecedence();
-
-      // Create a new basic block to start insertion into.
-      BasicBlock *BB = BasicBlock::Create(getGlobalContext(), "entry", TheFunction);
-      Builder.SetInsertPoint(BB);
-
-      if (Value *RetVal = Body->codegen()) {
-        ...
-
-Basically, before codegening a function, if it is a user-defined
-operator, we register it in the precedence table. This allows the binary
-operator parsing logic we already have in place to handle it. Since we
-are working on a fully-general operator precedence parser, this is all
-we need to do to "extend the grammar".
-
-Now we have useful user-defined binary operators. This builds a lot on
-the previous framework we built for other operators. Adding unary
-operators is a bit more challenging, because we don't have any framework
-for it yet - lets see what it takes.
-
-User-defined Unary Operators
-============================
-
-Since we don't currently support unary operators in the Kaleidoscope
-language, we'll need to add everything to support them. Above, we added
-simple support for the 'unary' keyword to the lexer. In addition to
-that, we need an AST node:
-
-.. code-block:: c++
-
-    /// UnaryExprAST - Expression class for a unary operator.
-    class UnaryExprAST : public ExprAST {
-      char Opcode;
-      std::unique_ptr<ExprAST> Operand;
-
-    public:
-      UnaryExprAST(char Opcode, std::unique_ptr<ExprAST> Operand)
-        : Opcode(Opcode), Operand(std::move(Operand)) {}
+      IfExprAST(std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Then,
+                std::unique_ptr<ExprAST> Else)
+        : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
       virtual Value *codegen();
     };
 
-This AST node is very simple and obvious by now. It directly mirrors the
-binary operator AST node, except that it only has one child. With this,
-we need to add the parsing logic. Parsing a unary operator is pretty
-simple: we'll add a new function to do it:
+The AST node just has pointers to the various subexpressions.
+
+Parser Extensions for If/Then/Else
+----------------------------------
+
+Now that we have the relevant tokens coming from the lexer and we have
+the AST node to build, our parsing logic is relatively straightforward.
+First we define a new parsing function:
 
 .. code-block:: c++
 
-    /// unary
-    ///   ::= primary
-    ///   ::= '!' unary
-    static std::unique_ptr<ExprAST> ParseUnary() {
-      // If the current token is not an operator, it must be a primary expr.
-      if (!isascii(CurTok) || CurTok == '(' || CurTok == ',')
-        return ParsePrimary();
+    /// ifexpr ::= 'if' expression 'then' expression 'else' expression
+    static std::unique_ptr<ExprAST> ParseIfExpr() {
+      getNextToken();  // eat the if.
 
-      // If this is a unary operator, read it.
-      int Opc = CurTok;
-      getNextToken();
-      if (auto Operand = ParseUnary())
-        return llvm::unique_ptr<UnaryExprAST>(Opc, std::move(Operand));
-      return nullptr;
-    }
-
-The grammar we add is pretty straightforward here. If we see a unary
-operator when parsing a primary operator, we eat the operator as a
-prefix and parse the remaining piece as another unary operator. This
-allows us to handle multiple unary operators (e.g. "!!x"). Note that
-unary operators can't have ambiguous parses like binary operators can,
-so there is no need for precedence information.
-
-The problem with this function, is that we need to call ParseUnary from
-somewhere. To do this, we change previous callers of ParsePrimary to
-call ParseUnary instead:
-
-.. code-block:: c++
-
-    /// binoprhs
-    ///   ::= ('+' unary)*
-    static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
-                                                  std::unique_ptr<ExprAST> LHS) {
-      ...
-        // Parse the unary expression after the binary operator.
-        auto RHS = ParseUnary();
-        if (!RHS)
-          return nullptr;
-      ...
-    }
-    /// expression
-    ///   ::= unary binoprhs
-    ///
-    static std::unique_ptr<ExprAST> ParseExpression() {
-      auto LHS = ParseUnary();
-      if (!LHS)
+      // condition.
+      auto Cond = ParseExpression();
+      if (!Cond)
         return nullptr;
 
-      return ParseBinOpRHS(0, std::move(LHS));
+      if (CurTok != tok_then)
+        return Error("expected then");
+      getNextToken();  // eat the then
+
+      auto Then = ParseExpression();
+      if (!Then)
+        return nullptr;
+
+      if (CurTok != tok_else)
+        return Error("expected else");
+
+      getNextToken();
+
+      auto Else = ParseExpression();
+      if (!Else)
+        return nullptr;
+
+      return llvm::make_unique<IfExprAST>(std::move(Cond), std::move(Then),
+                                          std::move(Else));
     }
 
-With these two simple changes, we are now able to parse unary operators
-and build the AST for them. Next up, we need to add parser support for
-prototypes, to parse the unary operator prototype. We extend the binary
-operator code above with:
+Next we hook it up as a primary expression:
 
 .. code-block:: c++
 
-    /// prototype
-    ///   ::= id '(' id* ')'
-    ///   ::= binary LETTER number? (id, id)
-    ///   ::= unary LETTER (id)
-    static std::unique_ptr<PrototypeAST> ParsePrototype() {
-      std::string FnName;
-
-      unsigned Kind = 0;  // 0 = identifier, 1 = unary, 2 = binary.
-      unsigned BinaryPrecedence = 30;
-
+    static std::unique_ptr<ExprAST> ParsePrimary() {
       switch (CurTok) {
       default:
-        return ErrorP("Expected function name in prototype");
+        return Error("unknown token when expecting an expression");
       case tok_identifier:
-        FnName = IdentifierStr;
-        Kind = 0;
-        getNextToken();
-        break;
-      case tok_unary:
-        getNextToken();
-        if (!isascii(CurTok))
-          return ErrorP("Expected unary operator");
-        FnName = "unary";
-        FnName += (char)CurTok;
-        Kind = 1;
-        getNextToken();
-        break;
-      case tok_binary:
-        ...
+        return ParseIdentifierExpr();
+      case tok_number:
+        return ParseNumberExpr();
+      case '(':
+        return ParseParenExpr();
+      case tok_if:
+        return ParseIfExpr();
+      }
+    }
 
-As with binary operators, we name unary operators with a name that
-includes the operator character. This assists us at code generation
-time. Speaking of, the final piece we need to add is codegen support for
-unary operators. It looks like this:
+LLVM IR for If/Then/Else
+------------------------
+
+Now that we have it parsing and building the AST, the final piece is
+adding LLVM code generation support. This is the most interesting part
+of the if/then/else example, because this is where it starts to
+introduce new concepts. All of the code above has been thoroughly
+described in previous chapters.
+
+To motivate the code we want to produce, lets take a look at a simple
+example. Consider:
+
+::
+
+    extern foo();
+    extern bar();
+    def baz(x) if x then foo() else bar();
+
+If you disable optimizations, the code you'll (soon) get from
+Kaleidoscope looks like this:
+
+.. code-block:: llvm
+
+    declare double @foo()
+
+    declare double @bar()
+
+    define double @baz(double %x) {
+    entry:
+      %ifcond = fcmp one double %x, 0.000000e+00
+      br i1 %ifcond, label %then, label %else
+
+    then:       ; preds = %entry
+      %calltmp = call double @foo()
+      br label %ifcont
+
+    else:       ; preds = %entry
+      %calltmp1 = call double @bar()
+      br label %ifcont
+
+    ifcont:     ; preds = %else, %then
+      %iftmp = phi double [ %calltmp, %then ], [ %calltmp1, %else ]
+      ret double %iftmp
+    }
+
+To visualize the control flow graph, you can use a nifty feature of the
+LLVM '`opt <http://llvm.org/cmds/opt.html>`_' tool. If you put this LLVM
+IR into "t.ll" and run "``llvm-as < t.ll | opt -analyze -view-cfg``", `a
+window will pop up <../ProgrammersManual.html#viewing-graphs-while-debugging-code>`_ and you'll
+see this graph:
+
+.. figure:: LangImpl6-cfg.png
+   :align: center
+   :alt: Example CFG
+
+   Example CFG
+
+Another way to get this is to call "``F->viewCFG()``" or
+"``F->viewCFGOnly()``" (where F is a "``Function*``") either by
+inserting actual calls into the code and recompiling or by calling these
+in the debugger. LLVM has many nice features for visualizing various
+graphs.
+
+Getting back to the generated code, it is fairly simple: the entry block
+evaluates the conditional expression ("x" in our case here) and compares
+the result to 0.0 with the "``fcmp one``" instruction ('one' is "Ordered
+and Not Equal"). Based on the result of this expression, the code jumps
+to either the "then" or "else" blocks, which contain the expressions for
+the true/false cases.
+
+Once the then/else blocks are finished executing, they both branch back
+to the 'ifcont' block to execute the code that happens after the
+if/then/else. In this case the only thing left to do is to return to the
+caller of the function. The question then becomes: how does the code
+know which expression to return?
+
+The answer to this question involves an important SSA operation: the
+`Phi
+operation <http://en.wikipedia.org/wiki/Static_single_assignment_form>`_.
+If you're not familiar with SSA, `the wikipedia
+article <http://en.wikipedia.org/wiki/Static_single_assignment_form>`_
+is a good introduction and there are various other introductions to it
+available on your favorite search engine. The short version is that
+"execution" of the Phi operation requires "remembering" which block
+control came from. The Phi operation takes on the value corresponding to
+the input control block. In this case, if control comes in from the
+"then" block, it gets the value of "calltmp". If control comes from the
+"else" block, it gets the value of "calltmp1".
+
+At this point, you are probably starting to think "Oh no! This means my
+simple and elegant front-end will have to start generating SSA form in
+order to use LLVM!". Fortunately, this is not the case, and we strongly
+advise *not* implementing an SSA construction algorithm in your
+front-end unless there is an amazingly good reason to do so. In
+practice, there are two sorts of values that float around in code
+written for your average imperative programming language that might need
+Phi nodes:
+
+#. Code that involves user variables: ``x = 1; x = x + 1;``
+#. Values that are implicit in the structure of your AST, such as the
+   Phi node in this case.
+
+In `Chapter 7 <LangImpl7.html>`_ of this tutorial ("mutable variables"),
+we'll talk about #1 in depth. For now, just believe me that you don't
+need SSA construction to handle this case. For #2, you have the choice
+of using the techniques that we will describe for #1, or you can insert
+Phi nodes directly, if convenient. In this case, it is really
+easy to generate the Phi node, so we choose to do it directly.
+
+Okay, enough of the motivation and overview, lets generate code!
+
+Code Generation for If/Then/Else
+--------------------------------
+
+In order to generate code for this, we implement the ``codegen`` method
+for ``IfExprAST``:
 
 .. code-block:: c++
 
-    Value *UnaryExprAST::codegen() {
-      Value *OperandV = Operand->codegen();
-      if (!OperandV)
+    Value *IfExprAST::codegen() {
+      Value *CondV = Cond->codegen();
+      if (!CondV)
         return nullptr;
 
-      Function *F = TheModule->getFunction(std::string("unary")+Opcode);
-      if (!F)
-        return ErrorV("Unknown unary operator");
+      // Convert condition to a bool by comparing equal to 0.0.
+      CondV = Builder.CreateFCmpONE(
+          CondV, ConstantFP::get(getGlobalContext(), APFloat(0.0)), "ifcond");
 
-      return Builder.CreateCall(F, OperandV, "unop");
+This code is straightforward and similar to what we saw before. We emit
+the expression for the condition, then compare that value to zero to get
+a truth value as a 1-bit (bool) value.
+
+.. code-block:: c++
+
+      Function *TheFunction = Builder.GetInsertBlock()->getParent();
+
+      // Create blocks for the then and else cases.  Insert the 'then' block at the
+      // end of the function.
+      BasicBlock *ThenBB =
+          BasicBlock::Create(getGlobalContext(), "then", TheFunction);
+      BasicBlock *ElseBB = BasicBlock::Create(getGlobalContext(), "else");
+      BasicBlock *MergeBB = BasicBlock::Create(getGlobalContext(), "ifcont");
+
+      Builder.CreateCondBr(CondV, ThenBB, ElseBB);
+
+This code creates the basic blocks that are related to the if/then/else
+statement, and correspond directly to the blocks in the example above.
+The first line gets the current Function object that is being built. It
+gets this by asking the builder for the current BasicBlock, and asking
+that block for its "parent" (the function it is currently embedded
+into).
+
+Once it has that, it creates three blocks. Note that it passes
+"TheFunction" into the constructor for the "then" block. This causes the
+constructor to automatically insert the new block into the end of the
+specified function. The other two blocks are created, but aren't yet
+inserted into the function.
+
+Once the blocks are created, we can emit the conditional branch that
+chooses between them. Note that creating new blocks does not implicitly
+affect the IRBuilder, so it is still inserting into the block that the
+condition went into. Also note that it is creating a branch to the
+"then" block and the "else" block, even though the "else" block isn't
+inserted into the function yet. This is all ok: it is the standard way
+that LLVM supports forward references.
+
+.. code-block:: c++
+
+      // Emit then value.
+      Builder.SetInsertPoint(ThenBB);
+
+      Value *ThenV = Then->codegen();
+      if (!ThenV)
+        return nullptr;
+
+      Builder.CreateBr(MergeBB);
+      // Codegen of 'Then' can change the current block, update ThenBB for the PHI.
+      ThenBB = Builder.GetInsertBlock();
+
+After the conditional branch is inserted, we move the builder to start
+inserting into the "then" block. Strictly speaking, this call moves the
+insertion point to be at the end of the specified block. However, since
+the "then" block is empty, it also starts out by inserting at the
+beginning of the block. :)
+
+Once the insertion point is set, we recursively codegen the "then"
+expression from the AST. To finish off the "then" block, we create an
+unconditional branch to the merge block. One interesting (and very
+important) aspect of the LLVM IR is that it `requires all basic blocks
+to be "terminated" <../LangRef.html#functionstructure>`_ with a `control
+flow instruction <../LangRef.html#terminators>`_ such as return or
+branch. This means that all control flow, *including fall throughs* must
+be made explicit in the LLVM IR. If you violate this rule, the verifier
+will emit an error.
+
+The final line here is quite subtle, but is very important. The basic
+issue is that when we create the Phi node in the merge block, we need to
+set up the block/value pairs that indicate how the Phi will work.
+Importantly, the Phi node expects to have an entry for each predecessor
+of the block in the CFG. Why then, are we getting the current block when
+we just set it to ThenBB 5 lines above? The problem is that the "Then"
+expression may actually itself change the block that the Builder is
+emitting into if, for example, it contains a nested "if/then/else"
+expression. Because calling ``codegen()`` recursively could arbitrarily change
+the notion of the current block, we are required to get an up-to-date
+value for code that will set up the Phi node.
+
+.. code-block:: c++
+
+      // Emit else block.
+      TheFunction->getBasicBlockList().push_back(ElseBB);
+      Builder.SetInsertPoint(ElseBB);
+
+      Value *ElseV = Else->codegen();
+      if (!ElseV)
+        return nullptr;
+
+      Builder.CreateBr(MergeBB);
+      // codegen of 'Else' can change the current block, update ElseBB for the PHI.
+      ElseBB = Builder.GetInsertBlock();
+
+Code generation for the 'else' block is basically identical to codegen
+for the 'then' block. The only significant difference is the first line,
+which adds the 'else' block to the function. Recall previously that the
+'else' block was created, but not added to the function. Now that the
+'then' and 'else' blocks are emitted, we can finish up with the merge
+code:
+
+.. code-block:: c++
+
+      // Emit merge block.
+      TheFunction->getBasicBlockList().push_back(MergeBB);
+      Builder.SetInsertPoint(MergeBB);
+      PHINode *PN =
+        Builder.CreatePHI(Type::getDoubleTy(getGlobalContext()), 2, "iftmp");
+
+      PN->addIncoming(ThenV, ThenBB);
+      PN->addIncoming(ElseV, ElseBB);
+      return PN;
     }
 
-This code is similar to, but simpler than, the code for binary
-operators. It is simpler primarily because it doesn't need to handle any
-predefined operators.
+The first two lines here are now familiar: the first adds the "merge"
+block to the Function object (it was previously floating, like the else
+block above). The second changes the insertion point so that newly
+created code will go into the "merge" block. Once that is done, we need
+to create the PHI node and set up the block/value pairs for the PHI.
 
-Kicking the Tires
-=================
+Finally, the CodeGen function returns the phi node as the value computed
+by the if/then/else expression. In our example above, this returned
+value will feed into the code for the top-level function, which will
+create the return instruction.
 
-It is somewhat hard to believe, but with a few simple extensions we've
-covered in the last chapters, we have grown a real-ish language. With
-this, we can do a lot of interesting things, including I/O, math, and a
-bunch of other things. For example, we can now add a nice sequencing
-operator (printd is defined to print out the specified value and a
-newline):
+Overall, we now have the ability to execute conditional code in
+Kaleidoscope. With this extension, Kaleidoscope is a fairly complete
+language that can calculate a wide variety of numeric functions. Next up
+we'll add another useful expression that is familiar from non-functional
+languages...
 
-::
+'for' Loop Expression
+=====================
 
-    ready> extern printd(x);
-    Read extern:
-    declare double @printd(double)
-
-    ready> def binary : 1 (x y) 0;  # Low-precedence operator that ignores operands.
-    ..
-    ready> printd(123) : printd(456) : printd(789);
-    123.000000
-    456.000000
-    789.000000
-    Evaluated to 0.000000
-
-We can also define a bunch of other "primitive" operations, such as:
+Now that we know how to add basic control flow constructs to the
+language, we have the tools to add more powerful things. Lets add
+something more aggressive, a 'for' expression:
 
 ::
 
-    # Logical unary not.
-    def unary!(v)
-      if v then
-        0
+     extern putchard(char)
+     def printstar(n)
+       for i = 1, i < n, 1.0 in
+         putchard(42);  # ascii 42 = '*'
+
+     # print 100 '*' characters
+     printstar(100);
+
+This expression defines a new variable ("i" in this case) which iterates
+from a starting value, while the condition ("i < n" in this case) is
+true, incrementing by an optional step value ("1.0" in this case). If
+the step value is omitted, it defaults to 1.0. While the loop is true,
+it executes its body expression. Because we don't have anything better
+to return, we'll just define the loop as always returning 0.0. In the
+future when we have mutable variables, it will get more useful.
+
+As before, lets talk about the changes that we need to Kaleidoscope to
+support this.
+
+Lexer Extensions for the 'for' Loop
+-----------------------------------
+
+The lexer extensions are the same sort of thing as for if/then/else:
+
+.. code-block:: c++
+
+      ... in enum Token ...
+      // control
+      tok_if = -6, tok_then = -7, tok_else = -8,
+      tok_for = -9, tok_in = -10
+
+      ... in gettok ...
+      if (IdentifierStr == "def")
+        return tok_def;
+      if (IdentifierStr == "extern")
+        return tok_extern;
+      if (IdentifierStr == "if")
+        return tok_if;
+      if (IdentifierStr == "then")
+        return tok_then;
+      if (IdentifierStr == "else")
+        return tok_else;
+      if (IdentifierStr == "for")
+        return tok_for;
+      if (IdentifierStr == "in")
+        return tok_in;
+      return tok_identifier;
+
+AST Extensions for the 'for' Loop
+---------------------------------
+
+The AST node is just as simple. It basically boils down to capturing the
+variable name and the constituent expressions in the node.
+
+.. code-block:: c++
+
+    /// ForExprAST - Expression class for for/in.
+    class ForExprAST : public ExprAST {
+      std::string VarName;
+      std::unique_ptr<ExprAST> Start, End, Step, Body;
+
+    public:
+      ForExprAST(const std::string &VarName, std::unique_ptr<ExprAST> Start,
+                 std::unique_ptr<ExprAST> End, std::unique_ptr<ExprAST> Step,
+                 std::unique_ptr<ExprAST> Body)
+        : VarName(VarName), Start(std::move(Start)), End(std::move(End)),
+          Step(std::move(Step)), Body(std::move(Body)) {}
+      virtual Value *codegen();
+    };
+
+Parser Extensions for the 'for' Loop
+------------------------------------
+
+The parser code is also fairly standard. The only interesting thing here
+is handling of the optional step value. The parser code handles it by
+checking to see if the second comma is present. If not, it sets the step
+value to null in the AST node:
+
+.. code-block:: c++
+
+    /// forexpr ::= 'for' identifier '=' expr ',' expr (',' expr)? 'in' expression
+    static std::unique_ptr<ExprAST> ParseForExpr() {
+      getNextToken();  // eat the for.
+
+      if (CurTok != tok_identifier)
+        return Error("expected identifier after for");
+
+      std::string IdName = IdentifierStr;
+      getNextToken();  // eat identifier.
+
+      if (CurTok != '=')
+        return Error("expected '=' after for");
+      getNextToken();  // eat '='.
+
+
+      auto Start = ParseExpression();
+      if (!Start)
+        return nullptr;
+      if (CurTok != ',')
+        return Error("expected ',' after for start value");
+      getNextToken();
+
+      auto End = ParseExpression();
+      if (!End)
+        return nullptr;
+
+      // The step value is optional.
+      std::unique_ptr<ExprAST> Step;
+      if (CurTok == ',') {
+        getNextToken();
+        Step = ParseExpression();
+        if (!Step)
+          return nullptr;
+      }
+
+      if (CurTok != tok_in)
+        return Error("expected 'in' after for");
+      getNextToken();  // eat 'in'.
+
+      auto Body = ParseExpression();
+      if (!Body)
+        return nullptr;
+
+      return llvm::make_unique<ForExprAST>(IdName, std::move(Start),
+                                           std::move(End), std::move(Step),
+                                           std::move(Body));
+    }
+
+LLVM IR for the 'for' Loop
+--------------------------
+
+Now we get to the good part: the LLVM IR we want to generate for this
+thing. With the simple example above, we get this LLVM IR (note that
+this dump is generated with optimizations disabled for clarity):
+
+.. code-block:: llvm
+
+    declare double @putchard(double)
+
+    define double @printstar(double %n) {
+    entry:
+      ; initial value = 1.0 (inlined into phi)
+      br label %loop
+
+    loop:       ; preds = %loop, %entry
+      %i = phi double [ 1.000000e+00, %entry ], [ %nextvar, %loop ]
+      ; body
+      %calltmp = call double @putchard(double 4.200000e+01)
+      ; increment
+      %nextvar = fadd double %i, 1.000000e+00
+
+      ; termination test
+      %cmptmp = fcmp ult double %i, %n
+      %booltmp = uitofp i1 %cmptmp to double
+      %loopcond = fcmp one double %booltmp, 0.000000e+00
+      br i1 %loopcond, label %loop, label %afterloop
+
+    afterloop:      ; preds = %loop
+      ; loop always returns 0.0
+      ret double 0.000000e+00
+    }
+
+This loop contains all the same constructs we saw before: a phi node,
+several expressions, and some basic blocks. Lets see how this fits
+together.
+
+Code Generation for the 'for' Loop
+----------------------------------
+
+The first part of codegen is very simple: we just output the start
+expression for the loop value:
+
+.. code-block:: c++
+
+    Value *ForExprAST::codegen() {
+      // Emit the start code first, without 'variable' in scope.
+      Value *StartVal = Start->codegen();
+      if (StartVal == 0) return 0;
+
+With this out of the way, the next step is to set up the LLVM basic
+block for the start of the loop body. In the case above, the whole loop
+body is one block, but remember that the body code itself could consist
+of multiple blocks (e.g. if it contains an if/then/else or a for/in
+expression).
+
+.. code-block:: c++
+
+      // Make the new basic block for the loop header, inserting after current
+      // block.
+      Function *TheFunction = Builder.GetInsertBlock()->getParent();
+      BasicBlock *PreheaderBB = Builder.GetInsertBlock();
+      BasicBlock *LoopBB =
+          BasicBlock::Create(getGlobalContext(), "loop", TheFunction);
+
+      // Insert an explicit fall through from the current block to the LoopBB.
+      Builder.CreateBr(LoopBB);
+
+This code is similar to what we saw for if/then/else. Because we will
+need it to create the Phi node, we remember the block that falls through
+into the loop. Once we have that, we create the actual block that starts
+the loop and create an unconditional branch for the fall-through between
+the two blocks.
+
+.. code-block:: c++
+
+      // Start insertion in LoopBB.
+      Builder.SetInsertPoint(LoopBB);
+
+      // Start the PHI node with an entry for Start.
+      PHINode *Variable = Builder.CreatePHI(Type::getDoubleTy(getGlobalContext()),
+                                            2, VarName.c_str());
+      Variable->addIncoming(StartVal, PreheaderBB);
+
+Now that the "preheader" for the loop is set up, we switch to emitting
+code for the loop body. To begin with, we move the insertion point and
+create the PHI node for the loop induction variable. Since we already
+know the incoming value for the starting value, we add it to the Phi
+node. Note that the Phi will eventually get a second value for the
+backedge, but we can't set it up yet (because it doesn't exist!).
+
+.. code-block:: c++
+
+      // Within the loop, the variable is defined equal to the PHI node.  If it
+      // shadows an existing variable, we have to restore it, so save it now.
+      Value *OldVal = NamedValues[VarName];
+      NamedValues[VarName] = Variable;
+
+      // Emit the body of the loop.  This, like any other expr, can change the
+      // current BB.  Note that we ignore the value computed by the body, but don't
+      // allow an error.
+      if (!Body->codegen())
+        return nullptr;
+
+Now the code starts to get more interesting. Our 'for' loop introduces a
+new variable to the symbol table. This means that our symbol table can
+now contain either function arguments or loop variables. To handle this,
+before we codegen the body of the loop, we add the loop variable as the
+current value for its name. Note that it is possible that there is a
+variable of the same name in the outer scope. It would be easy to make
+this an error (emit an error and return null if there is already an
+entry for VarName) but we choose to allow shadowing of variables. In
+order to handle this correctly, we remember the Value that we are
+potentially shadowing in ``OldVal`` (which will be null if there is no
+shadowed variable).
+
+Once the loop variable is set into the symbol table, the code
+recursively codegen's the body. This allows the body to use the loop
+variable: any references to it will naturally find it in the symbol
+table.
+
+.. code-block:: c++
+
+      // Emit the step value.
+      Value *StepVal = nullptr;
+      if (Step) {
+        StepVal = Step->codegen();
+        if (!StepVal)
+          return nullptr;
+      } else {
+        // If not specified, use 1.0.
+        StepVal = ConstantFP::get(getGlobalContext(), APFloat(1.0));
+      }
+
+      Value *NextVar = Builder.CreateFAdd(Variable, StepVal, "nextvar");
+
+Now that the body is emitted, we compute the next value of the iteration
+variable by adding the step value, or 1.0 if it isn't present.
+'``NextVar``' will be the value of the loop variable on the next
+iteration of the loop.
+
+.. code-block:: c++
+
+      // Compute the end condition.
+      Value *EndCond = End->codegen();
+      if (!EndCond)
+        return nullptr;
+
+      // Convert condition to a bool by comparing equal to 0.0.
+      EndCond = Builder.CreateFCmpONE(
+          EndCond, ConstantFP::get(getGlobalContext(), APFloat(0.0)), "loopcond");
+
+Finally, we evaluate the exit value of the loop, to determine whether
+the loop should exit. This mirrors the condition evaluation for the
+if/then/else statement.
+
+.. code-block:: c++
+
+      // Create the "after loop" block and insert it.
+      BasicBlock *LoopEndBB = Builder.GetInsertBlock();
+      BasicBlock *AfterBB =
+          BasicBlock::Create(getGlobalContext(), "afterloop", TheFunction);
+
+      // Insert the conditional branch into the end of LoopEndBB.
+      Builder.CreateCondBr(EndCond, LoopBB, AfterBB);
+
+      // Any new code will be inserted in AfterBB.
+      Builder.SetInsertPoint(AfterBB);
+
+With the code for the body of the loop complete, we just need to finish
+up the control flow for it. This code remembers the end block (for the
+phi node), then creates the block for the loop exit ("afterloop"). Based
+on the value of the exit condition, it creates a conditional branch that
+chooses between executing the loop again and exiting the loop. Any
+future code is emitted in the "afterloop" block, so it sets the
+insertion position to it.
+
+.. code-block:: c++
+
+      // Add a new entry to the PHI node for the backedge.
+      Variable->addIncoming(NextVar, LoopEndBB);
+
+      // Restore the unshadowed variable.
+      if (OldVal)
+        NamedValues[VarName] = OldVal;
       else
-        1;
+        NamedValues.erase(VarName);
 
-    # Unary negate.
-    def unary-(v)
-      0-v;
+      // for expr always returns 0.0.
+      return Constant::getNullValue(Type::getDoubleTy(getGlobalContext()));
+    }
 
-    # Define > with the same precedence as <.
-    def binary> 10 (LHS RHS)
-      RHS < LHS;
+The final code handles various cleanups: now that we have the "NextVar"
+value, we can add the incoming value to the loop PHI node. After that,
+we remove the loop variable from the symbol table, so that it isn't in
+scope after the for loop. Finally, code generation of the for loop
+always returns 0.0, so that is what we return from
+``ForExprAST::codegen()``.
 
-    # Binary logical or, which does not short circuit.
-    def binary| 5 (LHS RHS)
-      if LHS then
-        1
-      else if RHS then
-        1
-      else
-        0;
-
-    # Binary logical and, which does not short circuit.
-    def binary& 6 (LHS RHS)
-      if !LHS then
-        0
-      else
-        !!RHS;
-
-    # Define = with slightly lower precedence than relationals.
-    def binary = 9 (LHS RHS)
-      !(LHS < RHS | LHS > RHS);
-
-    # Define ':' for sequencing: as a low-precedence operator that ignores operands
-    # and just returns the RHS.
-    def binary : 1 (x y) y;
-
-Given the previous if/then/else support, we can also define interesting
-functions for I/O. For example, the following prints out a character
-whose "density" reflects the value passed in: the lower the value, the
-denser the character:
-
-::
-
-    ready>
-
-    extern putchard(char)
-    def printdensity(d)
-      if d > 8 then
-        putchard(32)  # ' '
-      else if d > 4 then
-        putchard(46)  # '.'
-      else if d > 2 then
-        putchard(43)  # '+'
-      else
-        putchard(42); # '*'
-    ...
-    ready> printdensity(1): printdensity(2): printdensity(3):
-           printdensity(4): printdensity(5): printdensity(9):
-           putchard(10);
-    **++.
-    Evaluated to 0.000000
-
-Based on these simple primitive operations, we can start to define more
-interesting things. For example, here's a little function that solves
-for the number of iterations it takes a function in the complex plane to
-converge:
-
-::
-
-    # Determine whether the specific location diverges.
-    # Solve for z = z^2 + c in the complex plane.
-    def mandleconverger(real imag iters creal cimag)
-      if iters > 255 | (real*real + imag*imag > 4) then
-        iters
-      else
-        mandleconverger(real*real - imag*imag + creal,
-                        2*real*imag + cimag,
-                        iters+1, creal, cimag);
-
-    # Return the number of iterations required for the iteration to escape
-    def mandleconverge(real imag)
-      mandleconverger(real, imag, 0, real, imag);
-
-This "``z = z2 + c``" function is a beautiful little creature that is
-the basis for computation of the `Mandelbrot
-Set <http://en.wikipedia.org/wiki/Mandelbrot_set>`_. Our
-``mandelconverge`` function returns the number of iterations that it
-takes for a complex orbit to escape, saturating to 255. This is not a
-very useful function by itself, but if you plot its value over a
-two-dimensional plane, you can see the Mandelbrot set. Given that we are
-limited to using putchard here, our amazing graphical output is limited,
-but we can whip together something using the density plotter above:
-
-::
-
-    # Compute and plot the mandlebrot set with the specified 2 dimensional range
-    # info.
-    def mandelhelp(xmin xmax xstep   ymin ymax ystep)
-      for y = ymin, y < ymax, ystep in (
-        (for x = xmin, x < xmax, xstep in
-           printdensity(mandleconverge(x,y)))
-        : putchard(10)
-      )
-
-    # mandel - This is a convenient helper function for plotting the mandelbrot set
-    # from the specified position with the specified Magnification.
-    def mandel(realstart imagstart realmag imagmag)
-      mandelhelp(realstart, realstart+realmag*78, realmag,
-                 imagstart, imagstart+imagmag*40, imagmag);
-
-Given this, we can try plotting out the mandlebrot set! Lets try it out:
-
-::
-
-    ready> mandel(-2.3, -1.3, 0.05, 0.07);
-    *******************************+++++++++++*************************************
-    *************************+++++++++++++++++++++++*******************************
-    **********************+++++++++++++++++++++++++++++****************************
-    *******************+++++++++++++++++++++.. ...++++++++*************************
-    *****************++++++++++++++++++++++.... ...+++++++++***********************
-    ***************+++++++++++++++++++++++.....   ...+++++++++*********************
-    **************+++++++++++++++++++++++....     ....+++++++++********************
-    *************++++++++++++++++++++++......      .....++++++++*******************
-    ************+++++++++++++++++++++.......       .......+++++++******************
-    ***********+++++++++++++++++++....                ... .+++++++*****************
-    **********+++++++++++++++++.......                     .+++++++****************
-    *********++++++++++++++...........                    ...+++++++***************
-    ********++++++++++++............                      ...++++++++**************
-    ********++++++++++... ..........                        .++++++++**************
-    *******+++++++++.....                                   .+++++++++*************
-    *******++++++++......                                  ..+++++++++*************
-    *******++++++.......                                   ..+++++++++*************
-    *******+++++......                                     ..+++++++++*************
-    *******.... ....                                      ...+++++++++*************
-    *******.... .                                         ...+++++++++*************
-    *******+++++......                                    ...+++++++++*************
-    *******++++++.......                                   ..+++++++++*************
-    *******++++++++......                                   .+++++++++*************
-    *******+++++++++.....                                  ..+++++++++*************
-    ********++++++++++... ..........                        .++++++++**************
-    ********++++++++++++............                      ...++++++++**************
-    *********++++++++++++++..........                     ...+++++++***************
-    **********++++++++++++++++........                     .+++++++****************
-    **********++++++++++++++++++++....                ... ..+++++++****************
-    ***********++++++++++++++++++++++.......       .......++++++++*****************
-    ************+++++++++++++++++++++++......      ......++++++++******************
-    **************+++++++++++++++++++++++....      ....++++++++********************
-    ***************+++++++++++++++++++++++.....   ...+++++++++*********************
-    *****************++++++++++++++++++++++....  ...++++++++***********************
-    *******************+++++++++++++++++++++......++++++++*************************
-    *********************++++++++++++++++++++++.++++++++***************************
-    *************************+++++++++++++++++++++++*******************************
-    ******************************+++++++++++++************************************
-    *******************************************************************************
-    *******************************************************************************
-    *******************************************************************************
-    Evaluated to 0.000000
-    ready> mandel(-2, -1, 0.02, 0.04);
-    **************************+++++++++++++++++++++++++++++++++++++++++++++++++++++
-    ***********************++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    *********************+++++++++++++++++++++++++++++++++++++++++++++++++++++++++.
-    *******************+++++++++++++++++++++++++++++++++++++++++++++++++++++++++...
-    *****************+++++++++++++++++++++++++++++++++++++++++++++++++++++++++.....
-    ***************++++++++++++++++++++++++++++++++++++++++++++++++++++++++........
-    **************++++++++++++++++++++++++++++++++++++++++++++++++++++++...........
-    ************+++++++++++++++++++++++++++++++++++++++++++++++++++++..............
-    ***********++++++++++++++++++++++++++++++++++++++++++++++++++........        .
-    **********++++++++++++++++++++++++++++++++++++++++++++++.............
-    ********+++++++++++++++++++++++++++++++++++++++++++..................
-    *******+++++++++++++++++++++++++++++++++++++++.......................
-    ******+++++++++++++++++++++++++++++++++++...........................
-    *****++++++++++++++++++++++++++++++++............................
-    *****++++++++++++++++++++++++++++...............................
-    ****++++++++++++++++++++++++++......   .........................
-    ***++++++++++++++++++++++++.........     ......    ...........
-    ***++++++++++++++++++++++............
-    **+++++++++++++++++++++..............
-    **+++++++++++++++++++................
-    *++++++++++++++++++.................
-    *++++++++++++++++............ ...
-    *++++++++++++++..............
-    *+++....++++................
-    *..........  ...........
-    *
-    *..........  ...........
-    *+++....++++................
-    *++++++++++++++..............
-    *++++++++++++++++............ ...
-    *++++++++++++++++++.................
-    **+++++++++++++++++++................
-    **+++++++++++++++++++++..............
-    ***++++++++++++++++++++++............
-    ***++++++++++++++++++++++++.........     ......    ...........
-    ****++++++++++++++++++++++++++......   .........................
-    *****++++++++++++++++++++++++++++...............................
-    *****++++++++++++++++++++++++++++++++............................
-    ******+++++++++++++++++++++++++++++++++++...........................
-    *******+++++++++++++++++++++++++++++++++++++++.......................
-    ********+++++++++++++++++++++++++++++++++++++++++++..................
-    Evaluated to 0.000000
-    ready> mandel(-0.9, -1.4, 0.02, 0.03);
-    *******************************************************************************
-    *******************************************************************************
-    *******************************************************************************
-    **********+++++++++++++++++++++************************************************
-    *+++++++++++++++++++++++++++++++++++++++***************************************
-    +++++++++++++++++++++++++++++++++++++++++++++**********************************
-    ++++++++++++++++++++++++++++++++++++++++++++++++++*****************************
-    ++++++++++++++++++++++++++++++++++++++++++++++++++++++*************************
-    +++++++++++++++++++++++++++++++++++++++++++++++++++++++++**********************
-    +++++++++++++++++++++++++++++++++.........++++++++++++++++++*******************
-    +++++++++++++++++++++++++++++++....   ......+++++++++++++++++++****************
-    +++++++++++++++++++++++++++++.......  ........+++++++++++++++++++**************
-    ++++++++++++++++++++++++++++........   ........++++++++++++++++++++************
-    +++++++++++++++++++++++++++.........     ..  ...+++++++++++++++++++++**********
-    ++++++++++++++++++++++++++...........        ....++++++++++++++++++++++********
-    ++++++++++++++++++++++++.............       .......++++++++++++++++++++++******
-    +++++++++++++++++++++++.............        ........+++++++++++++++++++++++****
-    ++++++++++++++++++++++...........           ..........++++++++++++++++++++++***
-    ++++++++++++++++++++...........                .........++++++++++++++++++++++*
-    ++++++++++++++++++............                  ...........++++++++++++++++++++
-    ++++++++++++++++...............                 .............++++++++++++++++++
-    ++++++++++++++.................                 ...............++++++++++++++++
-    ++++++++++++..................                  .................++++++++++++++
-    +++++++++..................                      .................+++++++++++++
-    ++++++........        .                               .........  ..++++++++++++
-    ++............                                         ......    ....++++++++++
-    ..............                                                    ...++++++++++
-    ..............                                                    ....+++++++++
-    ..............                                                    .....++++++++
-    .............                                                    ......++++++++
-    ...........                                                     .......++++++++
-    .........                                                       ........+++++++
-    .........                                                       ........+++++++
-    .........                                                           ....+++++++
-    ........                                                             ...+++++++
-    .......                                                              ...+++++++
-                                                                        ....+++++++
-                                                                       .....+++++++
-                                                                        ....+++++++
-                                                                        ....+++++++
-                                                                        ....+++++++
-    Evaluated to 0.000000
-    ready> ^D
-
-At this point, you may be starting to realize that Kaleidoscope is a
-real and powerful language. It may not be self-similar :), but it can be
-used to plot things that are!
-
-With this, we conclude the "adding user-defined operators" chapter of
-the tutorial. We have successfully augmented our language, adding the
-ability to extend the language in the library, and we have shown how
-this can be used to build a simple but interesting end-user application
-in Kaleidoscope. At this point, Kaleidoscope can build a variety of
-applications that are functional and can call functions with
-side-effects, but it can't actually define and mutate a variable itself.
-
-Strikingly, variable mutation is an important feature of some languages,
-and it is not at all obvious how to `add support for mutable
-variables <LangImpl7.html>`_ without having to add an "SSA construction"
-phase to your front-end. In the next chapter, we will describe how you
-can add variable mutation without building SSA in your front-end.
+With this, we conclude the "adding control flow to Kaleidoscope" chapter
+of the tutorial. In this chapter we added two control flow constructs,
+and used them to motivate a couple of aspects of the LLVM IR that are
+important for front-end implementors to know. In the next chapter of our
+saga, we will get a bit crazier and add `user-defined
+operators <LangImpl6.html>`_ to our poor innocent language.
 
 Full Code Listing
 =================
@@ -751,18 +781,10 @@ the if/then/else and for expressions.. To build this example, use:
     # Run
     ./toy
 
-On some platforms, you will need to specify -rdynamic or
--Wl,--export-dynamic when linking. This ensures that symbols defined in
-the main executable are exported to the dynamic linker and so are
-available for symbol resolution at run time. This is not needed if you
-compile your support code into a shared library, although doing that
-will cause problems on Windows.
-
 Here is the code:
 
 .. literalinclude:: ../../examples/Kaleidoscope/Chapter6/toy.cpp
    :language: c++
 
-`Next: Extending the language: mutable variables / SSA
-construction <LangImpl7.html>`_
+`Next: Extending the language: user-defined operators <LangImpl6.html>`_
 

@@ -1,6 +1,6 @@
-======================================
-Kaleidoscope: Adding Debug Information
-======================================
+=======================================================
+Kaleidoscope: Extending the Language: Mutable Variables
+=======================================================
 
 .. contents::
    :local:
@@ -9,442 +9,861 @@ Chapter 8 Introduction
 ======================
 
 Welcome to Chapter 8 of the "`Implementing a language with
-LLVM <index.html>`_" tutorial. In chapters 1 through 7, we've built a
-decent little programming language with functions and variables.
-What happens if something goes wrong though, how do you debug your
-program?
+LLVM <index.html>`_" tutorial. In chapters 1 through 6, we've built a
+very respectable, albeit simple, `functional programming
+language <http://en.wikipedia.org/wiki/Functional_programming>`_. In our
+journey, we learned some parsing techniques, how to build and represent
+an AST, how to build LLVM IR, and how to optimize the resultant code as
+well as JIT compile it.
 
-Source level debugging uses formatted data that helps a debugger
-translate from binary and the state of the machine back to the
-source that the programmer wrote. In LLVM we generally use a format
-called `DWARF <http://dwarfstd.org>`_. DWARF is a compact encoding
-that represents types, source locations, and variable locations. 
+While Kaleidoscope is interesting as a functional language, the fact
+that it is functional makes it "too easy" to generate LLVM IR for it. In
+particular, a functional language makes it very easy to build LLVM IR
+directly in `SSA
+form <http://en.wikipedia.org/wiki/Static_single_assignment_form>`_.
+Since LLVM requires that the input code be in SSA form, this is a very
+nice property and it is often unclear to newcomers how to generate code
+for an imperative language with mutable variables.
 
-The short summary of this chapter is that we'll go through the
-various things you have to add to a programming language to
-support debug info, and how you translate that into DWARF.
-
-Caveat: For now we can't debug via the JIT, so we'll need to compile
-our program down to something small and standalone. As part of this
-we'll make a few modifications to the running of the language and
-how programs are compiled. This means that we'll have a source file
-with a simple program written in Kaleidoscope rather than the
-interactive JIT. It does involve a limitation that we can only
-have one "top level" command at a time to reduce the number of
-changes necessary.
-
-Here's the sample program we'll be compiling:
-
-.. code-block:: python
-
-   def fib(x)
-     if x < 3 then
-       1
-     else
-       fib(x-1)+fib(x-2);
-
-   fib(10)
-
+The short (and happy) summary of this chapter is that there is no need
+for your front-end to build SSA form: LLVM provides highly tuned and
+well tested support for this, though the way it works is a bit
+unexpected for some.
 
 Why is this a hard problem?
 ===========================
 
-Debug information is a hard problem for a few different reasons - mostly
-centered around optimized code. First, optimization makes keeping source
-locations more difficult. In LLVM IR we keep the original source location
-for each IR level instruction on the instruction. Optimization passes
-should keep the source locations for newly created instructions, but merged
-instructions only get to keep a single location - this can cause jumping
-around when stepping through optimized programs. Secondly, optimization
-can move variables in ways that are either optimized out, shared in memory
-with other variables, or difficult to track. For the purposes of this
-tutorial we're going to avoid optimization (as you'll see with one of the
-next sets of patches).
+To understand why mutable variables cause complexities in SSA
+construction, consider this extremely simple C example:
 
-Ahead-of-Time Compilation Mode
-==============================
+.. code-block:: c
 
-To highlight only the aspects of adding debug information to a source
-language without needing to worry about the complexities of JIT debugging
-we're going to make a few changes to Kaleidoscope to support compiling
-the IR emitted by the front end into a simple standalone program that
-you can execute, debug, and see results.
+    int G, H;
+    int test(_Bool Condition) {
+      int X;
+      if (Condition)
+        X = G;
+      else
+        X = H;
+      return X;
+    }
 
-First we make our anonymous function that contains our top level
-statement be our "main":
+In this case, we have the variable "X", whose value depends on the path
+executed in the program. Because there are two different possible values
+for X before the return instruction, a PHI node is inserted to merge the
+two values. The LLVM IR that we want for this example looks like this:
 
-.. code-block:: udiff
+.. code-block:: llvm
 
-  -    auto Proto = llvm::make_unique<PrototypeAST>("", std::vector<std::string>());
-  +    auto Proto = llvm::make_unique<PrototypeAST>("main", std::vector<std::string>());
+    @G = weak global i32 0   ; type of @G is i32*
+    @H = weak global i32 0   ; type of @H is i32*
 
-just with the simple change of giving it a name.
+    define i32 @test(i1 %Condition) {
+    entry:
+      br i1 %Condition, label %cond_true, label %cond_false
 
-Then we're going to remove the command line code wherever it exists:
+    cond_true:
+      %X.0 = load i32* @G
+      br label %cond_next
 
-.. code-block:: udiff
+    cond_false:
+      %X.1 = load i32* @H
+      br label %cond_next
 
-  @@ -1129,7 +1129,6 @@ static void HandleTopLevelExpression() {
-   /// top ::= definition | external | expression | ';'
-   static void MainLoop() {
-     while (1) {
-  -    fprintf(stderr, "ready> ");
-       switch (CurTok) {
-       case tok_eof:
-         return;
-  @@ -1184,7 +1183,6 @@ int main() {
-     BinopPrecedence['*'] = 40; // highest.
- 
-     // Prime the first token.
-  -  fprintf(stderr, "ready> ");
-     getNextToken();
- 
-Lastly we're going to disable all of the optimization passes and the JIT so
-that the only thing that happens after we're done parsing and generating
-code is that the llvm IR goes to standard error:
+    cond_next:
+      %X.2 = phi i32 [ %X.1, %cond_false ], [ %X.0, %cond_true ]
+      ret i32 %X.2
+    }
 
-.. code-block:: udiff
+In this example, the loads from the G and H global variables are
+explicit in the LLVM IR, and they live in the then/else branches of the
+if statement (cond\_true/cond\_false). In order to merge the incoming
+values, the X.2 phi node in the cond\_next block selects the right value
+to use based on where control flow is coming from: if control flow comes
+from the cond\_false block, X.2 gets the value of X.1. Alternatively, if
+control flow comes from cond\_true, it gets the value of X.0. The intent
+of this chapter is not to explain the details of SSA form. For more
+information, see one of the many `online
+references <http://en.wikipedia.org/wiki/Static_single_assignment_form>`_.
 
-  @@ -1108,17 +1108,8 @@ static void HandleExtern() {
-   static void HandleTopLevelExpression() {
-     // Evaluate a top-level expression into an anonymous function.
-     if (auto FnAST = ParseTopLevelExpr()) {
-  -    if (auto *FnIR = FnAST->codegen()) {
-  -      // We're just doing this to make sure it executes.
-  -      TheExecutionEngine->finalizeObject();
-  -      // JIT the function, returning a function pointer.
-  -      void *FPtr = TheExecutionEngine->getPointerToFunction(FnIR);
-  -
-  -      // Cast it to the right type (takes no arguments, returns a double) so we
-  -      // can call it as a native function.
-  -      double (*FP)() = (double (*)())(intptr_t)FPtr;
-  -      // Ignore the return value for this.
-  -      (void)FP;
-  +    if (!F->codegen()) {
-  +      fprintf(stderr, "Error generating code for top level expr");
-       }
-     } else {
-       // Skip token for error recovery.
-  @@ -1439,11 +1459,11 @@ int main() {
-     // target lays out data structures.
-     TheModule->setDataLayout(TheExecutionEngine->getDataLayout());
-     OurFPM.add(new DataLayoutPass());
-  +#if 0
-     OurFPM.add(createBasicAliasAnalysisPass());
-     // Promote allocas to registers.
-     OurFPM.add(createPromoteMemoryToRegisterPass());
-  @@ -1218,7 +1210,7 @@ int main() {
-     OurFPM.add(createGVNPass());
-     // Simplify the control flow graph (deleting unreachable blocks, etc).
-     OurFPM.add(createCFGSimplificationPass());
-  -
-  +  #endif
-     OurFPM.doInitialization();
- 
-     // Set the global so the code gen can use this.
+The question for this article is "who places the phi nodes when lowering
+assignments to mutable variables?". The issue here is that LLVM
+*requires* that its IR be in SSA form: there is no "non-ssa" mode for
+it. However, SSA construction requires non-trivial algorithms and data
+structures, so it is inconvenient and wasteful for every front-end to
+have to reproduce this logic.
 
-This relatively small set of changes get us to the point that we can compile
-our piece of Kaleidoscope language down to an executable program via this
-command line:
+Memory in LLVM
+==============
+
+The 'trick' here is that while LLVM does require all register values to
+be in SSA form, it does not require (or permit) memory objects to be in
+SSA form. In the example above, note that the loads from G and H are
+direct accesses to G and H: they are not renamed or versioned. This
+differs from some other compiler systems, which do try to version memory
+objects. In LLVM, instead of encoding dataflow analysis of memory into
+the LLVM IR, it is handled with `Analysis
+Passes <../WritingAnLLVMPass.html>`_ which are computed on demand.
+
+With this in mind, the high-level idea is that we want to make a stack
+variable (which lives in memory, because it is on the stack) for each
+mutable object in a function. To take advantage of this trick, we need
+to talk about how LLVM represents stack variables.
+
+In LLVM, all memory accesses are explicit with load/store instructions,
+and it is carefully designed not to have (or need) an "address-of"
+operator. Notice how the type of the @G/@H global variables is actually
+"i32\*" even though the variable is defined as "i32". What this means is
+that @G defines *space* for an i32 in the global data area, but its
+*name* actually refers to the address for that space. Stack variables
+work the same way, except that instead of being declared with global
+variable definitions, they are declared with the `LLVM alloca
+instruction <../LangRef.html#alloca-instruction>`_:
+
+.. code-block:: llvm
+
+    define i32 @example() {
+    entry:
+      %X = alloca i32           ; type of %X is i32*.
+      ...
+      %tmp = load i32* %X       ; load the stack value %X from the stack.
+      %tmp2 = add i32 %tmp, 1   ; increment it
+      store i32 %tmp2, i32* %X  ; store it back
+      ...
+
+This code shows an example of how you can declare and manipulate a stack
+variable in the LLVM IR. Stack memory allocated with the alloca
+instruction is fully general: you can pass the address of the stack slot
+to functions, you can store it in other variables, etc. In our example
+above, we could rewrite the example to use the alloca technique to avoid
+using a PHI node:
+
+.. code-block:: llvm
+
+    @G = weak global i32 0   ; type of @G is i32*
+    @H = weak global i32 0   ; type of @H is i32*
+
+    define i32 @test(i1 %Condition) {
+    entry:
+      %X = alloca i32           ; type of %X is i32*.
+      br i1 %Condition, label %cond_true, label %cond_false
+
+    cond_true:
+      %X.0 = load i32* @G
+      store i32 %X.0, i32* %X   ; Update X
+      br label %cond_next
+
+    cond_false:
+      %X.1 = load i32* @H
+      store i32 %X.1, i32* %X   ; Update X
+      br label %cond_next
+
+    cond_next:
+      %X.2 = load i32* %X       ; Read X
+      ret i32 %X.2
+    }
+
+With this, we have discovered a way to handle arbitrary mutable
+variables without the need to create Phi nodes at all:
+
+#. Each mutable variable becomes a stack allocation.
+#. Each read of the variable becomes a load from the stack.
+#. Each update of the variable becomes a store to the stack.
+#. Taking the address of a variable just uses the stack address
+   directly.
+
+While this solution has solved our immediate problem, it introduced
+another one: we have now apparently introduced a lot of stack traffic
+for very simple and common operations, a major performance problem.
+Fortunately for us, the LLVM optimizer has a highly-tuned optimization
+pass named "mem2reg" that handles this case, promoting allocas like this
+into SSA registers, inserting Phi nodes as appropriate. If you run this
+example through the pass, for example, you'll get:
 
 .. code-block:: bash
 
-  Kaleidoscope-Ch8 < fib.ks | & clang -x ir -
+    $ llvm-as < example.ll | opt -mem2reg | llvm-dis
+    @G = weak global i32 0
+    @H = weak global i32 0
 
-which gives an a.out/a.exe in the current working directory.
+    define i32 @test(i1 %Condition) {
+    entry:
+      br i1 %Condition, label %cond_true, label %cond_false
 
-Compile Unit
-============
+    cond_true:
+      %X.0 = load i32* @G
+      br label %cond_next
 
-The top level container for a section of code in DWARF is a compile unit.
-This contains the type and function data for an individual translation unit
-(read: one file of source code). So the first thing we need to do is
-construct one for our fib.ks file.
+    cond_false:
+      %X.1 = load i32* @H
+      br label %cond_next
 
-DWARF Emission Setup
-====================
+    cond_next:
+      %X.01 = phi i32 [ %X.1, %cond_false ], [ %X.0, %cond_true ]
+      ret i32 %X.01
+    }
 
-Similar to the ``IRBuilder`` class we have a
-`DIBuilder <http://llvm.org/doxygen/classllvm_1_1DIBuilder.html>`_ class
-that helps in constructing debug metadata for an llvm IR file. It
-corresponds 1:1 similarly to ``IRBuilder`` and llvm IR, but with nicer names.
-Using it does require that you be more familiar with DWARF terminology than
-you needed to be with ``IRBuilder`` and ``Instruction`` names, but if you
-read through the general documentation on the
-`Metadata Format <http://llvm.org/docs/SourceLevelDebugging.html>`_ it
-should be a little more clear. We'll be using this class to construct all
-of our IR level descriptions. Construction for it takes a module so we
-need to construct it shortly after we construct our module. We've left it
-as a global static variable to make it a bit easier to use.
+The mem2reg pass implements the standard "iterated dominance frontier"
+algorithm for constructing SSA form and has a number of optimizations
+that speed up (very common) degenerate cases. The mem2reg optimization
+pass is the answer to dealing with mutable variables, and we highly
+recommend that you depend on it. Note that mem2reg only works on
+variables in certain circumstances:
 
-Next we're going to create a small container to cache some of our frequent
-data. The first will be our compile unit, but we'll also write a bit of
-code for our one type since we won't have to worry about multiple typed
-expressions:
+#. mem2reg is alloca-driven: it looks for allocas and if it can handle
+   them, it promotes them. It does not apply to global variables or heap
+   allocations.
+#. mem2reg only looks for alloca instructions in the entry block of the
+   function. Being in the entry block guarantees that the alloca is only
+   executed once, which makes analysis simpler.
+#. mem2reg only promotes allocas whose uses are direct loads and stores.
+   If the address of the stack object is passed to a function, or if any
+   funny pointer arithmetic is involved, the alloca will not be
+   promoted.
+#. mem2reg only works on allocas of `first
+   class <../LangRef.html#first-class-types>`_ values (such as pointers,
+   scalars and vectors), and only if the array size of the allocation is
+   1 (or missing in the .ll file). mem2reg is not capable of promoting
+   structs or arrays to registers. Note that the "scalarrepl" pass is
+   more powerful and can promote structs, "unions", and arrays in many
+   cases.
 
-.. code-block:: c++
+All of these properties are easy to satisfy for most imperative
+languages, and we'll illustrate it below with Kaleidoscope. The final
+question you may be asking is: should I bother with this nonsense for my
+front-end? Wouldn't it be better if I just did SSA construction
+directly, avoiding use of the mem2reg optimization pass? In short, we
+strongly recommend that you use this technique for building SSA form,
+unless there is an extremely good reason not to. Using this technique
+is:
 
-  static DIBuilder *DBuilder;
+-  Proven and well tested: clang uses this technique
+   for local mutable variables. As such, the most common clients of LLVM
+   are using this to handle a bulk of their variables. You can be sure
+   that bugs are found fast and fixed early.
+-  Extremely Fast: mem2reg has a number of special cases that make it
+   fast in common cases as well as fully general. For example, it has
+   fast-paths for variables that are only used in a single block,
+   variables that only have one assignment point, good heuristics to
+   avoid insertion of unneeded phi nodes, etc.
+-  Needed for debug info generation: `Debug information in
+   LLVM <../SourceLevelDebugging.html>`_ relies on having the address of
+   the variable exposed so that debug info can be attached to it. This
+   technique dovetails very naturally with this style of debug info.
 
-  struct DebugInfo {
-    DICompileUnit *TheCU;
-    DIType *DblTy;
+If nothing else, this makes it much easier to get your front-end up and
+running, and is very simple to implement. Lets extend Kaleidoscope with
+mutable variables now!
 
-    DIType *getDoubleTy();
-  } KSDbgInfo;
+Mutable Variables in Kaleidoscope
+=================================
 
-  DIType *DebugInfo::getDoubleTy() {
-    if (DblTy.isValid())
-      return DblTy;
+Now that we know the sort of problem we want to tackle, lets see what
+this looks like in the context of our little Kaleidoscope language.
+We're going to add two features:
 
-    DblTy = DBuilder->createBasicType("double", 64, 64, dwarf::DW_ATE_float);
-    return DblTy;
-  }
+#. The ability to mutate variables with the '=' operator.
+#. The ability to define new variables.
 
-And then later on in ``main`` when we're constructing our module:
+While the first item is really what this is about, we only have
+variables for incoming arguments as well as for induction variables, and
+redefining those only goes so far :). Also, the ability to define new
+variables is a useful thing regardless of whether you will be mutating
+them. Here's a motivating example that shows how we could use these:
 
-.. code-block:: c++
+::
 
-  DBuilder = new DIBuilder(*TheModule);
+    # Define ':' for sequencing: as a low-precedence operator that ignores operands
+    # and just returns the RHS.
+    def binary : 1 (x y) y;
 
-  KSDbgInfo.TheCU = DBuilder->createCompileUnit(
-      dwarf::DW_LANG_C, "fib.ks", ".", "Kaleidoscope Compiler", 0, "", 0);
+    # Recursive fib, we could do this before.
+    def fib(x)
+      if (x < 3) then
+        1
+      else
+        fib(x-1)+fib(x-2);
 
-There are a couple of things to note here. First, while we're producing a
-compile unit for a language called Kaleidoscope we used the language
-constant for C. This is because a debugger wouldn't necessarily understand
-the calling conventions or default ABI for a language it doesn't recognize
-and we follow the C ABI in our llvm code generation so it's the closest
-thing to accurate. This ensures we can actually call functions from the
-debugger and have them execute. Secondly, you'll see the "fib.ks" in the
-call to ``createCompileUnit``. This is a default hard coded value since
-we're using shell redirection to put our source into the Kaleidoscope
-compiler. In a usual front end you'd have an input file name and it would
-go there.
+    # Iterative fib.
+    def fibi(x)
+      var a = 1, b = 1, c in
+      (for i = 3, i < x in
+         c = a + b :
+         a = b :
+         b = c) :
+      b;
 
-One last thing as part of emitting debug information via DIBuilder is that
-we need to "finalize" the debug information. The reasons are part of the
-underlying API for DIBuilder, but make sure you do this near the end of
-main:
+    # Call it.
+    fibi(10);
 
-.. code-block:: c++
+In order to mutate variables, we have to change our existing variables
+to use the "alloca trick". Once we have that, we'll add our new
+operator, then extend Kaleidoscope to support new variable definitions.
 
-  DBuilder->finalize();
+Adjusting Existing Variables for Mutation
+=========================================
 
-before you dump out the module.
+The symbol table in Kaleidoscope is managed at code generation time by
+the '``NamedValues``' map. This map currently keeps track of the LLVM
+"Value\*" that holds the double value for the named variable. In order
+to support mutation, we need to change this slightly, so that it
+``NamedValues`` holds the *memory location* of the variable in question.
+Note that this change is a refactoring: it changes the structure of the
+code, but does not (by itself) change the behavior of the compiler. All
+of these changes are isolated in the Kaleidoscope code generator.
 
-Functions
-=========
+At this point in Kaleidoscope's development, it only supports variables
+for two things: incoming arguments to functions and the induction
+variable of 'for' loops. For consistency, we'll allow mutation of these
+variables in addition to other user-defined variables. This means that
+these will both need memory locations.
 
-Now that we have our ``Compile Unit`` and our source locations, we can add
-function definitions to the debug info. So in ``PrototypeAST::codegen()`` we
-add a few lines of code to describe a context for our subprogram, in this
-case the "File", and the actual definition of the function itself.
-
-So the context:
-
-.. code-block:: c++
-
-  DIFile *Unit = DBuilder->createFile(KSDbgInfo.TheCU.getFilename(),
-                                      KSDbgInfo.TheCU.getDirectory());
-
-giving us an DIFile and asking the ``Compile Unit`` we created above for the
-directory and filename where we are currently. Then, for now, we use some
-source locations of 0 (since our AST doesn't currently have source location
-information) and construct our function definition:
-
-.. code-block:: c++
-
-  DIScope *FContext = Unit;
-  unsigned LineNo = 0;
-  unsigned ScopeLine = 0;
-  DISubprogram *SP = DBuilder->createFunction(
-      FContext, Name, StringRef(), Unit, LineNo,
-      CreateFunctionType(Args.size(), Unit), false /* internal linkage */,
-      true /* definition */, ScopeLine, DINode::FlagPrototyped, false);
-  F->setSubprogram(SP);
-
-and we now have an DISubprogram that contains a reference to all of our
-metadata for the function.
-
-Source Locations
-================
-
-The most important thing for debug information is accurate source location -
-this makes it possible to map your source code back. We have a problem though,
-Kaleidoscope really doesn't have any source location information in the lexer
-or parser so we'll need to add it.
-
-.. code-block:: c++
-
-   struct SourceLocation {
-     int Line;
-     int Col;
-   };
-   static SourceLocation CurLoc;
-   static SourceLocation LexLoc = {1, 0};
-
-   static int advance() {
-     int LastChar = getchar();
-
-     if (LastChar == '\n' || LastChar == '\r') {
-       LexLoc.Line++;
-       LexLoc.Col = 0;
-     } else
-       LexLoc.Col++;
-     return LastChar;
-   }
-
-In this set of code we've added some functionality on how to keep track of the
-line and column of the "source file". As we lex every token we set our current
-current "lexical location" to the assorted line and column for the beginning
-of the token. We do this by overriding all of the previous calls to
-``getchar()`` with our new ``advance()`` that keeps track of the information
-and then we have added to all of our AST classes a source location:
+To start our transformation of Kaleidoscope, we'll change the
+NamedValues map so that it maps to AllocaInst\* instead of Value\*. Once
+we do this, the C++ compiler will tell us what parts of the code we need
+to update:
 
 .. code-block:: c++
 
-   class ExprAST {
-     SourceLocation Loc;
+    static std::map<std::string, AllocaInst*> NamedValues;
 
-     public:
-       ExprAST(SourceLocation Loc = CurLoc) : Loc(Loc) {}
-       virtual ~ExprAST() {}
-       virtual Value* codegen() = 0;
-       int getLine() const { return Loc.Line; }
-       int getCol() const { return Loc.Col; }
-       virtual raw_ostream &dump(raw_ostream &out, int ind) {
-         return out << ':' << getLine() << ':' << getCol() << '\n';
-       }
-
-that we pass down through when we create a new expression:
+Also, since we will need to create these alloca's, we'll use a helper
+function that ensures that the allocas are created in the entry block of
+the function:
 
 .. code-block:: c++
 
-   LHS = llvm::make_unique<BinaryExprAST>(BinLoc, BinOp, std::move(LHS),
-                                          std::move(RHS));
+    /// CreateEntryBlockAlloca - Create an alloca instruction in the entry block of
+    /// the function.  This is used for mutable variables etc.
+    static AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
+                                              const std::string &VarName) {
+      IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                     TheFunction->getEntryBlock().begin());
+      return TmpB.CreateAlloca(Type::getDoubleTy(getGlobalContext()), 0,
+                               VarName.c_str());
+    }
 
-giving us locations for each of our expressions and variables.
+This funny looking code creates an IRBuilder object that is pointing at
+the first instruction (.begin()) of the entry block. It then creates an
+alloca with the expected name and returns it. Because all values in
+Kaleidoscope are doubles, there is no need to pass in a type to use.
 
-From this we can make sure to tell ``DIBuilder`` when we're at a new source
-location so it can use that when we generate the rest of our code and make
-sure that each instruction has source location information. We do this
-by constructing another small function:
-
-.. code-block:: c++
-
-  void DebugInfo::emitLocation(ExprAST *AST) {
-    DIScope *Scope;
-    if (LexicalBlocks.empty())
-      Scope = TheCU;
-    else
-      Scope = LexicalBlocks.back();
-    Builder.SetCurrentDebugLocation(
-        DebugLoc::get(AST->getLine(), AST->getCol(), Scope));
-  }
-
-that both tells the main ``IRBuilder`` where we are, but also what scope
-we're in. Since we've just created a function above we can either be in
-the main file scope (like when we created our function), or now we can be
-in the function scope we just created. To represent this we create a stack
-of scopes:
+With this in place, the first functionality change we want to make is to
+variable references. In our new scheme, variables live on the stack, so
+code generating a reference to them actually needs to produce a load
+from the stack slot:
 
 .. code-block:: c++
 
-   std::vector<DIScope *> LexicalBlocks;
-   std::map<const PrototypeAST *, DIScope *> FnScopeMap;
+    Value *VariableExprAST::codegen() {
+      // Look this variable up in the function.
+      Value *V = NamedValues[Name];
+      if (!V)
+        return ErrorV("Unknown variable name");
 
-and keep a map of each function to the scope that it represents (an
-DISubprogram is also an DIScope).
+      // Load the value.
+      return Builder.CreateLoad(V, Name.c_str());
+    }
 
-Then we make sure to:
-
-.. code-block:: c++
-
-   KSDbgInfo.emitLocation(this);
-
-emit the location every time we start to generate code for a new AST, and
-also:
-
-.. code-block:: c++
-
-  KSDbgInfo.FnScopeMap[this] = SP;
-
-store the scope (function) when we create it and use it:
-
-  KSDbgInfo.LexicalBlocks.push_back(&KSDbgInfo.FnScopeMap[Proto]);
-
-when we start generating the code for each function.
-
-also, don't forget to pop the scope back off of your scope stack at the
-end of the code generation for the function:
+As you can see, this is pretty straightforward. Now we need to update
+the things that define the variables to set up the alloca. We'll start
+with ``ForExprAST::codegen()`` (see the `full code listing <#id1>`_ for
+the unabridged code):
 
 .. code-block:: c++
 
-  // Pop off the lexical block for the function since we added it
-  // unconditionally.
-  KSDbgInfo.LexicalBlocks.pop_back();
+      Function *TheFunction = Builder.GetInsertBlock()->getParent();
 
-Variables
-=========
+      // Create an alloca for the variable in the entry block.
+      AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, VarName);
 
-Now that we have functions, we need to be able to print out the variables
-we have in scope. Let's get our function arguments set up so we can get
-decent backtraces and see how our functions are being called. It isn't
-a lot of code, and we generally handle it when we're creating the
-argument allocas in ``PrototypeAST::CreateArgumentAllocas``.
+        // Emit the start code first, without 'variable' in scope.
+      Value *StartVal = Start->codegen();
+      if (!StartVal)
+        return nullptr;
 
-.. code-block:: c++
+      // Store the value into the alloca.
+      Builder.CreateStore(StartVal, Alloca);
+      ...
 
-  DIScope *Scope = KSDbgInfo.LexicalBlocks.back();
-  DIFile *Unit = DBuilder->createFile(KSDbgInfo.TheCU.getFilename(),
-                                      KSDbgInfo.TheCU.getDirectory());
-  DILocalVariable D = DBuilder->createParameterVariable(
-      Scope, Args[Idx], Idx + 1, Unit, Line, KSDbgInfo.getDoubleTy(), true);
+      // Compute the end condition.
+      Value *EndCond = End->codegen();
+      if (!EndCond)
+        return nullptr;
 
-  DBuilder->insertDeclare(Alloca, D, DBuilder->createExpression(),
-                          DebugLoc::get(Line, 0, Scope),
-                          Builder.GetInsertBlock());
+      // Reload, increment, and restore the alloca.  This handles the case where
+      // the body of the loop mutates the variable.
+      Value *CurVar = Builder.CreateLoad(Alloca);
+      Value *NextVar = Builder.CreateFAdd(CurVar, StepVal, "nextvar");
+      Builder.CreateStore(NextVar, Alloca);
+      ...
 
-Here we're doing a few things. First, we're grabbing our current scope
-for the variable so we can say what range of code our variable is valid
-through. Second, we're creating the variable, giving it the scope,
-the name, source location, type, and since it's an argument, the argument
-index. Third, we create an ``lvm.dbg.declare`` call to indicate at the IR
-level that we've got a variable in an alloca (and it gives a starting
-location for the variable), and setting a source location for the
-beginning of the scope on the declare.
+This code is virtually identical to the code `before we allowed mutable
+variables <LangImpl5.html#code-generation-for-the-for-loop>`_. The big difference is that we
+no longer have to construct a PHI node, and we use load/store to access
+the variable as needed.
 
-One interesting thing to note at this point is that various debuggers have
-assumptions based on how code and debug information was generated for them
-in the past. In this case we need to do a little bit of a hack to avoid
-generating line information for the function prologue so that the debugger
-knows to skip over those instructions when setting a breakpoint. So in
-``FunctionAST::CodeGen`` we add a couple of lines:
+To support mutable argument variables, we need to also make allocas for
+them. The code for this is also pretty simple:
 
 .. code-block:: c++
 
-  // Unset the location for the prologue emission (leading instructions with no
-  // location in a function are considered part of the prologue and the debugger
-  // will run past them when breaking on a function)
-  KSDbgInfo.emitLocation(nullptr);
+    /// CreateArgumentAllocas - Create an alloca for each argument and register the
+    /// argument in the symbol table so that references to it will succeed.
+    void PrototypeAST::CreateArgumentAllocas(Function *F) {
+      Function::arg_iterator AI = F->arg_begin();
+      for (unsigned Idx = 0, e = Args.size(); Idx != e; ++Idx, ++AI) {
+        // Create an alloca for this variable.
+        AllocaInst *Alloca = CreateEntryBlockAlloca(F, Args[Idx]);
 
-and then emit a new location when we actually start generating code for the
-body of the function:
+        // Store the initial value into the alloca.
+        Builder.CreateStore(AI, Alloca);
+
+        // Add arguments to variable symbol table.
+        NamedValues[Args[Idx]] = Alloca;
+      }
+    }
+
+For each argument, we make an alloca, store the input value to the
+function into the alloca, and register the alloca as the memory location
+for the argument. This method gets invoked by ``FunctionAST::codegen()``
+right after it sets up the entry block for the function.
+
+The final missing piece is adding the mem2reg pass, which allows us to
+get good codegen once again:
 
 .. code-block:: c++
 
-  KSDbgInfo.emitLocation(Body);
+        // Set up the optimizer pipeline.  Start with registering info about how the
+        // target lays out data structures.
+        OurFPM.add(new DataLayout(*TheExecutionEngine->getDataLayout()));
+        // Promote allocas to registers.
+        OurFPM.add(createPromoteMemoryToRegisterPass());
+        // Do simple "peephole" optimizations and bit-twiddling optzns.
+        OurFPM.add(createInstructionCombiningPass());
+        // Reassociate expressions.
+        OurFPM.add(createReassociatePass());
 
-With this we have enough debug information to set breakpoints in functions,
-print out argument variables, and call functions. Not too bad for just a
-few simple lines of code!
+It is interesting to see what the code looks like before and after the
+mem2reg optimization runs. For example, this is the before/after code
+for our recursive fib function. Before the optimization:
+
+.. code-block:: llvm
+
+    define double @fib(double %x) {
+    entry:
+      %x1 = alloca double
+      store double %x, double* %x1
+      %x2 = load double* %x1
+      %cmptmp = fcmp ult double %x2, 3.000000e+00
+      %booltmp = uitofp i1 %cmptmp to double
+      %ifcond = fcmp one double %booltmp, 0.000000e+00
+      br i1 %ifcond, label %then, label %else
+
+    then:       ; preds = %entry
+      br label %ifcont
+
+    else:       ; preds = %entry
+      %x3 = load double* %x1
+      %subtmp = fsub double %x3, 1.000000e+00
+      %calltmp = call double @fib(double %subtmp)
+      %x4 = load double* %x1
+      %subtmp5 = fsub double %x4, 2.000000e+00
+      %calltmp6 = call double @fib(double %subtmp5)
+      %addtmp = fadd double %calltmp, %calltmp6
+      br label %ifcont
+
+    ifcont:     ; preds = %else, %then
+      %iftmp = phi double [ 1.000000e+00, %then ], [ %addtmp, %else ]
+      ret double %iftmp
+    }
+
+Here there is only one variable (x, the input argument) but you can
+still see the extremely simple-minded code generation strategy we are
+using. In the entry block, an alloca is created, and the initial input
+value is stored into it. Each reference to the variable does a reload
+from the stack. Also, note that we didn't modify the if/then/else
+expression, so it still inserts a PHI node. While we could make an
+alloca for it, it is actually easier to create a PHI node for it, so we
+still just make the PHI.
+
+Here is the code after the mem2reg pass runs:
+
+.. code-block:: llvm
+
+    define double @fib(double %x) {
+    entry:
+      %cmptmp = fcmp ult double %x, 3.000000e+00
+      %booltmp = uitofp i1 %cmptmp to double
+      %ifcond = fcmp one double %booltmp, 0.000000e+00
+      br i1 %ifcond, label %then, label %else
+
+    then:
+      br label %ifcont
+
+    else:
+      %subtmp = fsub double %x, 1.000000e+00
+      %calltmp = call double @fib(double %subtmp)
+      %subtmp5 = fsub double %x, 2.000000e+00
+      %calltmp6 = call double @fib(double %subtmp5)
+      %addtmp = fadd double %calltmp, %calltmp6
+      br label %ifcont
+
+    ifcont:     ; preds = %else, %then
+      %iftmp = phi double [ 1.000000e+00, %then ], [ %addtmp, %else ]
+      ret double %iftmp
+    }
+
+This is a trivial case for mem2reg, since there are no redefinitions of
+the variable. The point of showing this is to calm your tension about
+inserting such blatent inefficiencies :).
+
+After the rest of the optimizers run, we get:
+
+.. code-block:: llvm
+
+    define double @fib(double %x) {
+    entry:
+      %cmptmp = fcmp ult double %x, 3.000000e+00
+      %booltmp = uitofp i1 %cmptmp to double
+      %ifcond = fcmp ueq double %booltmp, 0.000000e+00
+      br i1 %ifcond, label %else, label %ifcont
+
+    else:
+      %subtmp = fsub double %x, 1.000000e+00
+      %calltmp = call double @fib(double %subtmp)
+      %subtmp5 = fsub double %x, 2.000000e+00
+      %calltmp6 = call double @fib(double %subtmp5)
+      %addtmp = fadd double %calltmp, %calltmp6
+      ret double %addtmp
+
+    ifcont:
+      ret double 1.000000e+00
+    }
+
+Here we see that the simplifycfg pass decided to clone the return
+instruction into the end of the 'else' block. This allowed it to
+eliminate some branches and the PHI node.
+
+Now that all symbol table references are updated to use stack variables,
+we'll add the assignment operator.
+
+New Assignment Operator
+=======================
+
+With our current framework, adding a new assignment operator is really
+simple. We will parse it just like any other binary operator, but handle
+it internally (instead of allowing the user to define it). The first
+step is to set a precedence:
+
+.. code-block:: c++
+
+     int main() {
+       // Install standard binary operators.
+       // 1 is lowest precedence.
+       BinopPrecedence['='] = 2;
+       BinopPrecedence['<'] = 10;
+       BinopPrecedence['+'] = 20;
+       BinopPrecedence['-'] = 20;
+
+Now that the parser knows the precedence of the binary operator, it
+takes care of all the parsing and AST generation. We just need to
+implement codegen for the assignment operator. This looks like:
+
+.. code-block:: c++
+
+    Value *BinaryExprAST::codegen() {
+      // Special case '=' because we don't want to emit the LHS as an expression.
+      if (Op == '=') {
+        // Assignment requires the LHS to be an identifier.
+        VariableExprAST *LHSE = dynamic_cast<VariableExprAST*>(LHS.get());
+        if (!LHSE)
+          return ErrorV("destination of '=' must be a variable");
+
+Unlike the rest of the binary operators, our assignment operator doesn't
+follow the "emit LHS, emit RHS, do computation" model. As such, it is
+handled as a special case before the other binary operators are handled.
+The other strange thing is that it requires the LHS to be a variable. It
+is invalid to have "(x+1) = expr" - only things like "x = expr" are
+allowed.
+
+.. code-block:: c++
+
+        // Codegen the RHS.
+        Value *Val = RHS->codegen();
+        if (!Val)
+          return nullptr;
+
+        // Look up the name.
+        Value *Variable = NamedValues[LHSE->getName()];
+        if (!Variable)
+          return ErrorV("Unknown variable name");
+
+        Builder.CreateStore(Val, Variable);
+        return Val;
+      }
+      ...
+
+Once we have the variable, codegen'ing the assignment is
+straightforward: we emit the RHS of the assignment, create a store, and
+return the computed value. Returning a value allows for chained
+assignments like "X = (Y = Z)".
+
+Now that we have an assignment operator, we can mutate loop variables
+and arguments. For example, we can now run code like this:
+
+::
+
+    # Function to print a double.
+    extern printd(x);
+
+    # Define ':' for sequencing: as a low-precedence operator that ignores operands
+    # and just returns the RHS.
+    def binary : 1 (x y) y;
+
+    def test(x)
+      printd(x) :
+      x = 4 :
+      printd(x);
+
+    test(123);
+
+When run, this example prints "123" and then "4", showing that we did
+actually mutate the value! Okay, we have now officially implemented our
+goal: getting this to work requires SSA construction in the general
+case. However, to be really useful, we want the ability to define our
+own local variables, lets add this next!
+
+User-defined Local Variables
+============================
+
+Adding var/in is just like any other extension we made to
+Kaleidoscope: we extend the lexer, the parser, the AST and the code
+generator. The first step for adding our new 'var/in' construct is to
+extend the lexer. As before, this is pretty trivial, the code looks like
+this:
+
+.. code-block:: c++
+
+    enum Token {
+      ...
+      // var definition
+      tok_var = -13
+    ...
+    }
+    ...
+    static int gettok() {
+    ...
+        if (IdentifierStr == "in")
+          return tok_in;
+        if (IdentifierStr == "binary")
+          return tok_binary;
+        if (IdentifierStr == "unary")
+          return tok_unary;
+        if (IdentifierStr == "var")
+          return tok_var;
+        return tok_identifier;
+    ...
+
+The next step is to define the AST node that we will construct. For
+var/in, it looks like this:
+
+.. code-block:: c++
+
+    /// VarExprAST - Expression class for var/in
+    class VarExprAST : public ExprAST {
+      std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> VarNames;
+      std::unique_ptr<ExprAST> Body;
+
+    public:
+      VarExprAST(std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> VarNames,
+                 std::unique_ptr<ExprAST> body)
+      : VarNames(std::move(VarNames)), Body(std::move(Body)) {}
+
+      virtual Value *codegen();
+    };
+
+var/in allows a list of names to be defined all at once, and each name
+can optionally have an initializer value. As such, we capture this
+information in the VarNames vector. Also, var/in has a body, this body
+is allowed to access the variables defined by the var/in.
+
+With this in place, we can define the parser pieces. The first thing we
+do is add it as a primary expression:
+
+.. code-block:: c++
+
+    /// primary
+    ///   ::= identifierexpr
+    ///   ::= numberexpr
+    ///   ::= parenexpr
+    ///   ::= ifexpr
+    ///   ::= forexpr
+    ///   ::= varexpr
+    static std::unique_ptr<ExprAST> ParsePrimary() {
+      switch (CurTok) {
+      default:
+        return Error("unknown token when expecting an expression");
+      case tok_identifier:
+        return ParseIdentifierExpr();
+      case tok_number:
+        return ParseNumberExpr();
+      case '(':
+        return ParseParenExpr();
+      case tok_if:
+        return ParseIfExpr();
+      case tok_for:
+        return ParseForExpr();
+      case tok_var:
+        return ParseVarExpr();
+      }
+    }
+
+Next we define ParseVarExpr:
+
+.. code-block:: c++
+
+    /// varexpr ::= 'var' identifier ('=' expression)?
+    //                    (',' identifier ('=' expression)?)* 'in' expression
+    static std::unique_ptr<ExprAST> ParseVarExpr() {
+      getNextToken();  // eat the var.
+
+      std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> VarNames;
+
+      // At least one variable name is required.
+      if (CurTok != tok_identifier)
+        return Error("expected identifier after var");
+
+The first part of this code parses the list of identifier/expr pairs
+into the local ``VarNames`` vector.
+
+.. code-block:: c++
+
+      while (1) {
+        std::string Name = IdentifierStr;
+        getNextToken();  // eat identifier.
+
+        // Read the optional initializer.
+        std::unique_ptr<ExprAST> Init;
+        if (CurTok == '=') {
+          getNextToken(); // eat the '='.
+
+          Init = ParseExpression();
+          if (!Init) return nullptr;
+        }
+
+        VarNames.push_back(std::make_pair(Name, std::move(Init)));
+
+        // End of var list, exit loop.
+        if (CurTok != ',') break;
+        getNextToken(); // eat the ','.
+
+        if (CurTok != tok_identifier)
+          return Error("expected identifier list after var");
+      }
+
+Once all the variables are parsed, we then parse the body and create the
+AST node:
+
+.. code-block:: c++
+
+      // At this point, we have to have 'in'.
+      if (CurTok != tok_in)
+        return Error("expected 'in' keyword after 'var'");
+      getNextToken();  // eat 'in'.
+
+      auto Body = ParseExpression();
+      if (!Body)
+        return nullptr;
+
+      return llvm::make_unique<VarExprAST>(std::move(VarNames),
+                                           std::move(Body));
+    }
+
+Now that we can parse and represent the code, we need to support
+emission of LLVM IR for it. This code starts out with:
+
+.. code-block:: c++
+
+    Value *VarExprAST::codegen() {
+      std::vector<AllocaInst *> OldBindings;
+
+      Function *TheFunction = Builder.GetInsertBlock()->getParent();
+
+      // Register all variables and emit their initializer.
+      for (unsigned i = 0, e = VarNames.size(); i != e; ++i) {
+        const std::string &VarName = VarNames[i].first;
+        ExprAST *Init = VarNames[i].second.get();
+
+Basically it loops over all the variables, installing them one at a
+time. For each variable we put into the symbol table, we remember the
+previous value that we replace in OldBindings.
+
+.. code-block:: c++
+
+        // Emit the initializer before adding the variable to scope, this prevents
+        // the initializer from referencing the variable itself, and permits stuff
+        // like this:
+        //  var a = 1 in
+        //    var a = a in ...   # refers to outer 'a'.
+        Value *InitVal;
+        if (Init) {
+          InitVal = Init->codegen();
+          if (!InitVal)
+            return nullptr;
+        } else { // If not specified, use 0.0.
+          InitVal = ConstantFP::get(getGlobalContext(), APFloat(0.0));
+        }
+
+        AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, VarName);
+        Builder.CreateStore(InitVal, Alloca);
+
+        // Remember the old variable binding so that we can restore the binding when
+        // we unrecurse.
+        OldBindings.push_back(NamedValues[VarName]);
+
+        // Remember this binding.
+        NamedValues[VarName] = Alloca;
+      }
+
+There are more comments here than code. The basic idea is that we emit
+the initializer, create the alloca, then update the symbol table to
+point to it. Once all the variables are installed in the symbol table,
+we evaluate the body of the var/in expression:
+
+.. code-block:: c++
+
+      // Codegen the body, now that all vars are in scope.
+      Value *BodyVal = Body->codegen();
+      if (!BodyVal)
+        return nullptr;
+
+Finally, before returning, we restore the previous variable bindings:
+
+.. code-block:: c++
+
+      // Pop all our variables from scope.
+      for (unsigned i = 0, e = VarNames.size(); i != e; ++i)
+        NamedValues[VarNames[i].first] = OldBindings[i];
+
+      // Return the body computation.
+      return BodyVal;
+    }
+
+The end result of all of this is that we get properly scoped variable
+definitions, and we even (trivially) allow mutation of them :).
+
+With this, we completed what we set out to do. Our nice iterative fib
+example from the intro compiles and runs just fine. The mem2reg pass
+optimizes all of our stack variables into SSA registers, inserting PHI
+nodes where needed, and our front-end remains simple: no "iterated
+dominance frontier" computation anywhere in sight.
 
 Full Code Listing
 =================
 
 Here is the complete code listing for our running example, enhanced with
-debug information. To build this example, use:
+mutable variables and var/in support. To build this example, use:
 
 .. code-block:: bash
 
@@ -458,5 +877,5 @@ Here is the code:
 .. literalinclude:: ../../examples/Kaleidoscope/Chapter8/toy.cpp
    :language: c++
 
-`Next: Conclusion and other useful LLVM tidbits <LangImpl9.html>`_
+`Next: Adding Debug Information <LangImpl8.html>`_
 
