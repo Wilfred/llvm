@@ -5,9 +5,10 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetMachine.h"
 #include <cctype>
 #include <cstdio>
-#include <iostream>
 #include <map>
 #include <string>
 #include <vector>
@@ -573,20 +574,29 @@ int main() {
   // Print out all of the generated code.
   TheModule->dump();
 
-  // Initialize all the targets.
-  // InitializeAllTargets(); // TODO: compile error
+  // Initialize the target registry etc.
+  InitializeAllTargetInfos();
+  InitializeAllTargets();
+  InitializeAllTargetMCs();
+  InitializeAllAsmParsers();
+  InitializeAllAsmPrinters();
 
   std::string Error;
   auto Target = TargetRegistry::lookupTarget(TargetTriple, Error);
 
+  // Print an error and exit if we couldn't find the requested target.
+  // This generally occurs if we've forgotten to initialise the
+  // TargetRegistry or we have a bogus target triple.
   if (!Target) {
-      std::cerr << Error;
+      errs() << Error;
       return 1;
   }
 
-  auto Cpu = "generic";
+  auto CPU = "generic";
   auto Features = "";
 
+  TargetOptions opt;
+  auto TargetMachine = Target->createTargetMachine(TargetTriple, CPU, Features, opt);
   
 
   return 0;
