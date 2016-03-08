@@ -125,3 +125,19 @@ Emit Object Code
                                                  module.new_string_ptr(path) as *mut i8,
                                                  LLVMCodeGenFileType::LLVMObjectFile,
                                                  &mut obj_error);
+
+Putting It All Together
+=======================
+
+Compile:
+
+::
+    clang++ -g -O3 toy_just_module.cpp `llvm-config --cxxflags --ldflags --system-libs --libs all` -o toy
+
+Run it:
+
+
+
+We have an object file! Let's check it works:
+
+TODO
