@@ -10,8 +10,8 @@ set(LLVM_LINK_COMPONENTS
   native
   )
 
-add_kaleidoscope_chapter(Kaleidoscope-Ch7
+add_kaleidoscope_chapter(Kaleidoscope-Ch8
   toy.cpp
   )
 
-export_executable_symbols(Kaleidoscope-Ch7)
+export_executable_symbols(Kaleidoscope-Ch8)
