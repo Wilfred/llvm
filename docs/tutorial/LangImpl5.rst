@@ -39,22 +39,49 @@ returns the target triple of the current machine.
 
 .. code-block:: c++
 
-auto TargetTriple = sys::getDefaultTargetTriple();
+    auto TargetTriple = sys::getDefaultTargetTriple();
 
+LLVM doesn't require us to to link in all the target
+functionality. For example, if we're just using the JIT, we don't need
+the assembly printers. Similarly, if we're only targetting certain
+architectures, we can only link in the functionality for those
+architectures.
 
-Data layout
-===========
+For this example, we'll initialise all the targets.
 
-todo
+.. code-block:: c++
+
+    InitializeAllTargetInfos();
+    InitializeAllTargets();
+    InitializeAllTargetMCs();
+    InitializeAllAsmParsers();
+    InitializeAllAsmPrinters();
+
+We can now use our target triple to get a ``Target``:
+
+.. code-block:: c++
+
+  std::string Error;
+  auto Target = TargetRegistry::lookupTarget(TargetTriple, Error);
+
+  // Print an error and exit if we couldn't find the requested target.
+  // This generally occurs if we've forgotten to initialise the
+  // TargetRegistry or we have a bogus target triple.
+  if (!Target) {
+    errs() << Error;
+    return 1;
+  }
 
 Target Machine
 ==============
 
-We can also tell LLVM that we're happy using a specific feature (such as SSE) or
-even a specific CPU (such as sandylake).
+We will also need a ``TargetMachine``. This class provides a complete
+machine description of the machine we're targetting. If we want to
+target a specific feature (such as SSE) or a specific CPU (such as
+Intel's Sandylake), we do so now.
 
-We can use llc to see all the extra features and CPUs within an
-architecture that LLVM knows about. For example, let's look at x86:
+To see which features and CPUs that LLVM knows about, we can use
+``llc``. For example, let's look at x86:
 
 ::
 
@@ -74,72 +101,71 @@ architecture that LLVM knows about. For example, let's look at x86:
       3dnowa                - Enable 3DNow! Athlon instructions.
       ...
 
-In our example, we'll use the generic CPU without any additional
+For our example, we'll use the generic CPU without any additional
 features.
-    
-        let mut target = null_mut();
-        let mut err_msg_ptr = null_mut();
-        unsafe {
-            LLVMGetTargetFromTriple(target_triple, &mut target, &mut err_msg_ptr);
-            if target.is_null() {
-                // LLVM couldn't find a target triple with this name,
-                // so it should have given us an error message.
-                assert!(!err_msg_ptr.is_null());
 
-                let err_msg_cstr = CStr::from_ptr(err_msg_ptr as *const _);
-                let err_msg = str::from_utf8(err_msg_cstr.to_bytes()).unwrap();
-                return Err(err_msg.to_owned());
-            }
-        }
+.. code-block:: c++
 
-        // TODO: do these strings live long enough?
-        // cpu is documented: http://llvm.org/docs/CommandGuide/llc.html#cmdoption-mcpu
-        let cpu = CString::new("generic").unwrap();
-        // features are documented: http://llvm.org/docs/CommandGuide/llc.html#cmdoption-mattr
-        let features = CString::new("").unwrap();
+  auto CPU = "generic";
+  auto Features = "";
 
-        let target_machine;
-        unsafe {
-            target_machine =
-                LLVMCreateTargetMachine(target,
-                                        target_triple,
-                                        cpu.as_ptr() as *const _,
-                                        features.as_ptr() as *const _,
-                                        LLVMCodeGenOptLevel::LLVMCodeGenLevelAggressive,
-                                        LLVMRelocMode::LLVMRelocDefault,
-                                        LLVMCodeModel::LLVMCodeModelDefault);
-        }
+  TargetOptions opt;
+  auto TargetMachine =
+      Target->createTargetMachine(TargetTriple, CPU, Features, opt);
 
 
-Initialize Targets
-==================
+Configuring the Module
+======================
 
-        LLVM_InitializeAllTargetInfos();
-        LLVM_InitializeAllTargets();
-        LLVM_InitializeAllTargetMCs();
-        LLVM_InitializeAllAsmParsers();
-        LLVM_InitializeAllAsmPrinters();
+We're now ready to configure our module, to specify the target and
+data layout. This isn't strictly necessary, but
+:doc:`Frontend/PerformanceTips` recommends this. Optimization benefits
+from knowing about the target and data layout.
 
+.. code-block:: c++
+
+  TheModule->setDataLayout(TargetMachine->createDataLayout());
+  TheModule->setTargetTriple(TargetTriple);   
+  
 Emit Object Code
 ================
 
+We're ready to emit object code! Let's define where we want to write
+our file to:
 
-        let mut obj_error = module.new_mut_string_ptr("Writing object file failed.");
-        let result = LLVMTargetMachineEmitToFile(target_machine.tm,
-                                                 module.module,
-                                                 module.new_string_ptr(path) as *mut i8,
-                                                 LLVMCodeGenFileType::LLVMObjectFile,
-                                                 &mut obj_error);
+.. code-block:: c++
+
+  auto Filename = "output.o";
+  std::error_code EC;
+
+  raw_fd_ostream dest(Filename, EC, sys::fs::F_None);
+
+Finally, we define a pass that emits object code, then we run that
+pass:
+
+.. code-block:: c++
+
+  legacy::PassManager pass;
+  auto FileType = TargetMachine::CGFT_ObjectFile;
+
+  // TODO: Handle error
+  TargetMachine->addPassesToEmitFile(pass, dest, FileType);
+
+  pass.run(*TheModule);
+  dest.flush();
+
 
 Putting It All Together
 =======================
 
-Compile:
+Does it work? Let's give it a try. We need to compile our code, but
+note that the arguments to ``llvm-config`` are different to the previous chapters.
 
 ::
-    clang++ -g -O3 toy_just_module.cpp `llvm-config --cxxflags --ldflags --system-libs --libs all` -o toy
+    clang++ -g -O3 toy.cpp `llvm-config --cxxflags --ldflags --system-libs --libs all` -o toy
 
-Run it:
+Let's run it, and define a simple ``average`` function. Press Ctrl-D
+when you're done.
 
 ::
     $ ./toy
@@ -147,8 +173,8 @@ Run it:
     ^D
     Wrote output.o
 
-We have an object file! To test it, let's write a simple program that
-calls our average function.
+We have an object file! To test it, let's write a simple program and
+link it with our output. Here's the source code:
 
 .. code-block:: c++
 
