@@ -33,6 +33,9 @@ triple:
     $ clang --version | grep Target
     Target: x86_64-unknown-linux-gnu
 
+Running this command may show something different on your machine as
+you might be using a different architecture or operating system to me.
+
 Fortunately, we don't need to hard-code a target triple to target the
 current machine. LLVM provides ``sys::getDefaultTargetTriple``, which
 returns the target triple of the current machine.
@@ -47,7 +50,8 @@ the assembly printers. Similarly, if we're only targetting certain
 architectures, we can only link in the functionality for those
 architectures.
 
-For this example, we'll initialise all the targets.
+For this example, we'll initialize all the targets for emitting object
+code.
 
 .. code-block:: c++
 
@@ -110,17 +114,17 @@ features.
   auto Features = "";
 
   TargetOptions opt;
-  auto TargetMachine =
-      Target->createTargetMachine(TargetTriple, CPU, Features, opt);
+  auto TargetMachine = Target->createTargetMachine(TargetTriple, CPU, Features, opt);
 
 
 Configuring the Module
 ======================
 
 We're now ready to configure our module, to specify the target and
-data layout. This isn't strictly necessary, but
-:doc:`Frontend/PerformanceTips` recommends this. Optimization benefits
-from knowing about the target and data layout.
+data layout. This isn't strictly necessary, but the `frontend
+performance guide <../Frontend/PerformanceTips.html>`_ recommends
+this. Optimizations benefit from knowing about the target and data
+layout.
 
 .. code-block:: c++
 
@@ -137,8 +141,12 @@ our file to:
 
   auto Filename = "output.o";
   std::error_code EC;
-
   raw_fd_ostream dest(Filename, EC, sys::fs::F_None);
+
+  if (EC) {
+    errs() << "Could not open file: " << EC.message();
+    return 1;
+  }
 
 Finally, we define a pass that emits object code, then we run that
 pass:
@@ -148,12 +156,13 @@ pass:
   legacy::PassManager pass;
   auto FileType = TargetMachine::CGFT_ObjectFile;
 
-  // TODO: Handle error
-  TargetMachine->addPassesToEmitFile(pass, dest, FileType);
+  if (TargetMachine->addPassesToEmitFile(pass, dest, FileType)) {
+    errs() << "TargetMachine can't emit a file of this type";
+    return 1;
+  }
 
   pass.run(*TheModule);
   dest.flush();
-
 
 Putting It All Together
 =======================
@@ -162,12 +171,14 @@ Does it work? Let's give it a try. We need to compile our code, but
 note that the arguments to ``llvm-config`` are different to the previous chapters.
 
 ::
-    clang++ -g -O3 toy.cpp `llvm-config --cxxflags --ldflags --system-libs --libs all` -o toy
+
+    $ clang++ -g -O3 toy.cpp `llvm-config --cxxflags --ldflags --system-libs --libs all` -o toy
 
 Let's run it, and define a simple ``average`` function. Press Ctrl-D
 when you're done.
 
 ::
+   
     $ ./toy
     ready> def average(x y) (x + y) * 0.5;
     ^D

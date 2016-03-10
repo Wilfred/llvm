@@ -643,15 +643,20 @@ int main() {
 
   auto Filename = "output.o";
   std::error_code EC;
-
-  // todo: handle when we couldn't create this stream.
   raw_fd_ostream dest(Filename, EC, sys::fs::F_None);
+
+  if (EC) {
+    errs() << "Could not open file: " << EC.message();
+    return 1;
+  }
 
   legacy::PassManager pass;
   auto FileType = TargetMachine::CGFT_ObjectFile;
 
-  // TODO: Handle error
-  TargetMachine->addPassesToEmitFile(pass, dest, FileType);
+  if (TargetMachine->addPassesToEmitFile(pass, dest, FileType)) {
+    errs() << "TargetMachine can't emit a file of this type";
+    return 1;
+  }
 
   pass.run(*TheModule);
   dest.flush();
