@@ -786,5 +786,5 @@ Here is the code:
 .. literalinclude:: ../../examples/Kaleidoscope/Chapter6/toy.cpp
    :language: c++
 
-`Next: Extending the language: user-defined operators <LangImpl6.html>`_
+`Next: Extending the language: user-defined operators <LangImpl7.html>`_
 
