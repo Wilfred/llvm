@@ -286,5 +286,5 @@ Next we'll `build a simple parser that uses this to build an Abstract
 Syntax Tree <LangImpl2.html>`_. When we have that, we'll include a
 driver so that you can use the lexer and parser together.
 
-`Next: Implementing a Parser and AST <LangImpl2.html>`_
+`Next: Implementing a Parser and AST <LangImpl02.html>`_
 
