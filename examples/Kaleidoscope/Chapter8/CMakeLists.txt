@@ -1,13 +1,5 @@
 set(LLVM_LINK_COMPONENTS
-  Analysis
-  Core
-  ExecutionEngine
-  InstCombine
-  Object
-  RuntimeDyld
-  ScalarOpts
-  Support
-  native
+  all
   )
 
 add_kaleidoscope_chapter(Kaleidoscope-Ch8
