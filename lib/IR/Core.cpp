@@ -100,12 +100,12 @@ void LLVMContextDispose(LLVMContextRef C) {
   delete unwrap(C);
 }
 
-unsigned LLVMGetMDKindIDInContext(LLVMContextRef C, const char* Name,
+unsigned LLVMGetMDKindIDInContext(LLVMContextRef C, const char *Name,
                                   unsigned SLen) {
   return unwrap(C)->getMDKindID(StringRef(Name, SLen));
 }
 
-unsigned LLVMGetMDKindID(const char* Name, unsigned SLen) {
+unsigned LLVMGetMDKindID(const char *Name, unsigned SLen) {
   return LLVMGetMDKindIDInContext(LLVMGetGlobalContext(), Name, SLen);
 }
 
@@ -769,13 +769,13 @@ LLVMValueRef LLVMMDNode(LLVMValueRef *Vals, unsigned Count) {
   return LLVMMDNodeInContext(LLVMGetGlobalContext(), Vals, Count);
 }
 
-const char *LLVMGetMDString(LLVMValueRef V, unsigned* Len) {
+const char *LLVMGetMDString(LLVMValueRef V, unsigned *Length) {
   if (const auto *MD = dyn_cast<MetadataAsValue>(unwrap(V)))
     if (const MDString *S = dyn_cast<MDString>(MD->getMetadata())) {
-      *Len = S->getString().size();
+      *Length = S->getString().size();
       return S->getString().data();
     }
-  *Len = 0;
+  *Length = 0;
   return nullptr;
 }
 
@@ -925,10 +925,10 @@ LLVMBool LLVMIsConstantString(LLVMValueRef C) {
   return unwrap<ConstantDataSequential>(C)->isString();
 }
 
-const char *LLVMGetAsString(LLVMValueRef C, size_t* Length) {
-  StringRef str = unwrap<ConstantDataSequential>(C)->getAsString();
-  *Length = str.size();
-  return str.data();
+const char *LLVMGetAsString(LLVMValueRef C, size_t *Length) {
+  StringRef Str = unwrap<ConstantDataSequential>(C)->getAsString();
+  *Length = Str.size();
+  return Str.data();
 }
 
 LLVMValueRef LLVMConstArray(LLVMTypeRef ElementTy,
@@ -2908,6 +2908,61 @@ LLVMValueRef LLVMBuildAtomicRMW(LLVMBuilderRef B,LLVMAtomicRMWBinOp op,
     mapFromLLVMOrdering(ordering), singleThread ? SingleThread : CrossThread));
 }
 
+LLVMValueRef LLVMBuildAtomicCmpXchg(LLVMBuilderRef B, LLVMValueRef Ptr,
+                                    LLVMValueRef Cmp, LLVMValueRef New,
+                                    LLVMAtomicOrdering SuccessOrdering,
+                                    LLVMAtomicOrdering FailureOrdering,
+                                    LLVMBool singleThread) {
+
+  return wrap(unwrap(B)->CreateAtomicCmpXchg(unwrap(Ptr), unwrap(Cmp),
+                unwrap(New), mapFromLLVMOrdering(SuccessOrdering),
+                mapFromLLVMOrdering(FailureOrdering),
+                singleThread ? SingleThread : CrossThread));
+}
+
+
+LLVMBool LLVMIsAtomicSingleThread(LLVMValueRef AtomicInst) {
+  Value *P = unwrap<Value>(AtomicInst);
+
+  if (AtomicRMWInst *I = dyn_cast<AtomicRMWInst>(P))
+    return I->getSynchScope() == SingleThread;
+  return cast<AtomicCmpXchgInst>(P)->getSynchScope() == SingleThread;
+}
+
+void LLVMSetAtomicSingleThread(LLVMValueRef AtomicInst, LLVMBool NewValue) {
+  Value *P = unwrap<Value>(AtomicInst);
+  SynchronizationScope Sync = NewValue ? SingleThread : CrossThread;
+
+  if (AtomicRMWInst *I = dyn_cast<AtomicRMWInst>(P))
+    return I->setSynchScope(Sync);
+  return cast<AtomicCmpXchgInst>(P)->setSynchScope(Sync);
+}
+
+LLVMAtomicOrdering LLVMGetCmpXchgSuccessOrdering(LLVMValueRef CmpXchgInst)  {
+  Value *P = unwrap<Value>(CmpXchgInst);
+  return mapToLLVMOrdering(cast<AtomicCmpXchgInst>(P)->getSuccessOrdering());
+}
+
+void LLVMSetCmpXchgSuccessOrdering(LLVMValueRef CmpXchgInst,
+                                   LLVMAtomicOrdering Ordering) {
+  Value *P = unwrap<Value>(CmpXchgInst);
+  AtomicOrdering O = mapFromLLVMOrdering(Ordering);
+
+  return cast<AtomicCmpXchgInst>(P)->setSuccessOrdering(O);
+}
+
+LLVMAtomicOrdering LLVMGetCmpXchgFailureOrdering(LLVMValueRef CmpXchgInst)  {
+  Value *P = unwrap<Value>(CmpXchgInst);
+  return mapToLLVMOrdering(cast<AtomicCmpXchgInst>(P)->getFailureOrdering());
+}
+
+void LLVMSetCmpXchgFailureOrdering(LLVMValueRef CmpXchgInst,
+                                   LLVMAtomicOrdering Ordering) {
+  Value *P = unwrap<Value>(CmpXchgInst);
+  AtomicOrdering O = mapFromLLVMOrdering(Ordering);
+
+  return cast<AtomicCmpXchgInst>(P)->setFailureOrdering(O);
+}
 
 /*===-- Module providers --------------------------------------------------===*/
 

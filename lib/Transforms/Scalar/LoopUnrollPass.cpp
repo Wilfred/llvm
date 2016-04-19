@@ -639,6 +639,16 @@ static bool tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI,
       Count = (std::max(UP.PartialThreshold, 3u) - 2) / (LoopSize - 2);
       while (Count != 0 && TripCount % Count != 0)
         Count--;
+      if (Count <= 1) {
+        // If there is no Count that is modulo of TripCount, set Count to
+        // largest power-of-two factor that satisfies the threshold limit.
+        Count = (std::max(UP.PartialThreshold, 3u) - 2) / (LoopSize - 2);
+        UnrolledSize = (LoopSize - 2) * Count + 2;
+        while (Count != 0 && UnrolledSize > UP.PartialThreshold) {
+          Count >>= 1;
+          UnrolledSize = (LoopSize - 2) * Count + 2;
+        }
+      }
     }
   } else if (Unrolling == Runtime) {
     if (!AllowRuntime && !CountSetExplicitly) {
@@ -684,11 +694,6 @@ static bool tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI,
   }
 
   if (HasPragma) {
-    if (PragmaCount != 0)
-      // If loop has an unroll count pragma mark loop as unrolled to prevent
-      // unrolling beyond that requested by the pragma.
-      SetLoopAlreadyUnrolled(L);
-
     // Emit optimization remarks if we are unable to unroll the loop
     // as directed by a pragma.
     DebugLoc LoopLoc = L->getStartLoc();
@@ -738,6 +743,10 @@ static bool tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI,
                   TripMultiple, LI, SE, &DT, &AC, PreserveLCSSA))
     return false;
 
+  // If loop has an unroll count pragma mark loop as unrolled to prevent
+  // unrolling beyond that requested by the pragma.
+  if (HasPragma && PragmaCount != 0)
+    SetLoopAlreadyUnrolled(L);
   return true;
 }
 

@@ -158,7 +158,7 @@ class TypePromotionTransaction;
     const char *getPassName() const override { return "CodeGen Prepare"; }
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.addPreserved<DominatorTreeWrapperPass>();
+      // FIXME: When we can selectively preserve passes, preserve the domtree.
       AU.addRequired<TargetLibraryInfoWrapperPass>();
       AU.addRequired<TargetTransformInfoWrapperPass>();
     }
@@ -855,10 +855,14 @@ static bool CombineUAddWithOverflow(CmpInst *CI) {
 /// lose; some adjustment may be wanted there.
 ///
 /// Return true if any changes are made.
-static bool SinkCmpExpression(CmpInst *CI) {
+static bool SinkCmpExpression(CmpInst *CI, const TargetLowering *TLI) {
   BasicBlock *DefBB = CI->getParent();
 
-  /// Only insert a cmp in each block once.
+  // Avoid sinking soft-FP comparisons, since this can move them into a loop.
+  if (TLI && TLI->useSoftFloat() && isa<FCmpInst>(CI))
+    return false;
+
+  // Only insert a cmp in each block once.
   DenseMap<BasicBlock*, CmpInst*> InsertedCmps;
 
   bool MadeChange = false;
@@ -906,8 +910,8 @@ static bool SinkCmpExpression(CmpInst *CI) {
   return MadeChange;
 }
 
-static bool OptimizeCmpExpression(CmpInst *CI) {
-  if (SinkCmpExpression(CI))
+static bool OptimizeCmpExpression(CmpInst *CI, const TargetLowering *TLI) {
+  if (SinkCmpExpression(CI, TLI))
     return true;
 
   if (CombineUAddWithOverflow(CI))
@@ -5173,7 +5177,7 @@ bool CodeGenPrepare::optimizeInst(Instruction *I, bool& ModifiedDT) {
 
   if (CmpInst *CI = dyn_cast<CmpInst>(I))
     if (!TLI || !TLI->hasMultipleConditionRegisters())
-      return OptimizeCmpExpression(CI);
+      return OptimizeCmpExpression(CI, TLI);
 
   if (LoadInst *LI = dyn_cast<LoadInst>(I)) {
     stripInvariantGroupMetadata(*LI);
@@ -5277,6 +5281,7 @@ bool CodeGenPrepare::optimizeBlock(BasicBlock &BB, bool& ModifiedDT) {
     for (auto &I : reverse(BB)) {
       if (makeBitReverse(I, *DL, *TLI)) {
         MadeBitReverse = MadeChange = true;
+        ModifiedDT = true;
         break;
       }
     }

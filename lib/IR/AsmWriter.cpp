@@ -1403,6 +1403,7 @@ struct MDFieldPrinter {
   template <class IntTy, class Stringifier>
   void printDwarfEnum(StringRef Name, IntTy Value, Stringifier toString,
                       bool ShouldSkipZero = true);
+  void printEmissionKind(StringRef Name, DICompileUnit::DebugEmissionKind EK);
 };
 } // end namespace
 
@@ -1482,6 +1483,12 @@ void MDFieldPrinter::printDIFlags(StringRef Name, unsigned Flags) {
   if (Extra || SplitFlags.empty())
     Out << FlagsFS << Extra;
 }
+
+void MDFieldPrinter::printEmissionKind(StringRef Name,
+                                       DICompileUnit::DebugEmissionKind EK) {
+  Out << FS << Name << ": " << DICompileUnit::EmissionKindString(EK);
+}
+
 
 template <class IntTy, class Stringifier>
 void MDFieldPrinter::printDwarfEnum(StringRef Name, IntTy Value,
@@ -1640,8 +1647,7 @@ static void writeDICompileUnit(raw_ostream &Out, const DICompileUnit *N,
   Printer.printInt("runtimeVersion", N->getRuntimeVersion(),
                    /* ShouldSkipZero */ false);
   Printer.printString("splitDebugFilename", N->getSplitDebugFilename());
-  Printer.printInt("emissionKind", N->getEmissionKind(),
-                   /* ShouldSkipZero */ false);
+  Printer.printEmissionKind("emissionKind", N->getEmissionKind());
   Printer.printMetadata("enums", N->getRawEnumTypes());
   Printer.printMetadata("retainedTypes", N->getRawRetainedTypes());
   Printer.printMetadata("subprograms", N->getRawSubprograms());
@@ -1669,7 +1675,9 @@ static void writeDISubprogram(raw_ostream &Out, const DISubprogram *N,
   Printer.printMetadata("containingType", N->getRawContainingType());
   Printer.printDwarfEnum("virtuality", N->getVirtuality(),
                          dwarf::VirtualityString);
-  Printer.printInt("virtualIndex", N->getVirtualIndex());
+  if (N->getVirtuality() != dwarf::DW_VIRTUALITY_none ||
+      N->getVirtualIndex() != 0)
+    Printer.printInt("virtualIndex", N->getVirtualIndex(), false);
   Printer.printDIFlags("flags", N->getFlags());
   Printer.printBool("isOptimized", N->isOptimized());
   Printer.printMetadata("templateParams", N->getRawTemplateParams());
@@ -2212,6 +2220,12 @@ void AssemblyWriter::printModule(const Module *M) {
       // require a comment char before it).
       M->getModuleIdentifier().find('\n') == std::string::npos)
     Out << "; ModuleID = '" << M->getModuleIdentifier() << "'\n";
+
+  if (!M->getSourceFileName().empty()) {
+    Out << "source_filename = \"";
+    PrintEscapedString(M->getSourceFileName(), Out);
+    Out << "\"\n";
+  }
 
   const std::string &DL = M->getDataLayoutStr();
   if (!DL.empty())
@@ -3014,6 +3028,8 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
     Out << ' ';
     if (AI->isUsedWithInAlloca())
       Out << "inalloca ";
+    if (AI->isSwiftError())
+      Out << "swifterror ";
     TypePrinter.print(AI->getAllocatedType(), Out);
 
     // Explicitly write the array size if the code is broken, if it's an array

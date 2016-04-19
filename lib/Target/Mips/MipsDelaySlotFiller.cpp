@@ -189,6 +189,11 @@ namespace {
       return Changed;
     }
 
+    MachineFunctionProperties getRequiredProperties() const override {
+      return MachineFunctionProperties().set(
+          MachineFunctionProperties::Property::AllVRegsAllocated);
+    }
+
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<MachineBranchProbabilityInfo>();
       MachineFunctionPass::getAnalysisUsage(AU);
@@ -561,6 +566,12 @@ bool Filler::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
   const MipsSubtarget &STI = MBB.getParent()->getSubtarget<MipsSubtarget>();
   bool InMicroMipsMode = STI.inMicroMipsMode();
   const MipsInstrInfo *TII = STI.getInstrInfo();
+
+  if (InMicroMipsMode && STI.hasMips32r6()) {
+    // This is microMIPS32r6 or microMIPS64r6 processor. Delay slot for
+    // branching instructions is not needed.
+    return Changed;
+  }
 
   for (Iter I = MBB.begin(); I != MBB.end(); ++I) {
     if (!hasUnoccupiedSlot(&*I))

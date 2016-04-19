@@ -94,6 +94,8 @@ typedef enum {
     LLVMJumpTableAttribute = 1ULL << 45,
     LLVMConvergentAttribute = 1ULL << 46,
     LLVMSafeStackAttribute = 1ULL << 47,
+    LLVMSwiftSelfAttribute = 1ULL << 48,
+    LLVMSwiftErrorAttribute = 1ULL << 49,
     */
 } LLVMAttribute;
 
@@ -428,9 +430,9 @@ char *LLVMGetDiagInfoDescription(LLVMDiagnosticInfoRef DI);
  */
 LLVMDiagnosticSeverity LLVMGetDiagInfoSeverity(LLVMDiagnosticInfoRef DI);
 
-unsigned LLVMGetMDKindIDInContext(LLVMContextRef C, const char* Name,
+unsigned LLVMGetMDKindIDInContext(LLVMContextRef C, const char *Name,
                                   unsigned SLen);
-unsigned LLVMGetMDKindID(const char* Name, unsigned SLen);
+unsigned LLVMGetMDKindID(const char *Name, unsigned SLen);
 
 /**
  * @}
@@ -1525,7 +1527,7 @@ LLVMBool LLVMIsConstantString(LLVMValueRef c);
  *
  * @see ConstantDataSequential::getAsString()
  */
-const char *LLVMGetAsString(LLVMValueRef c, size_t* out);
+const char *LLVMGetAsString(LLVMValueRef c, size_t *Length);
 
 /**
  * Create an anonymous ConstantStruct with the specified values.
@@ -2055,10 +2057,10 @@ LLVMValueRef LLVMMDNode(LLVMValueRef *Vals, unsigned Count);
  * Obtain the underlying string from a MDString value.
  *
  * @param V Instance to obtain string from.
- * @param Len Memory address which will hold length of returned string.
+ * @param Length Memory address which will hold length of returned string.
  * @return String data in MDString.
  */
-const char  *LLVMGetMDString(LLVMValueRef V, unsigned* Len);
+const char *LLVMGetMDString(LLVMValueRef V, unsigned *Length);
 
 /**
  * Obtain the number of operands from an MDNode value.
@@ -2940,6 +2942,21 @@ LLVMValueRef LLVMBuildAtomicRMW(LLVMBuilderRef B, LLVMAtomicRMWBinOp op,
                                 LLVMValueRef PTR, LLVMValueRef Val,
                                 LLVMAtomicOrdering ordering,
                                 LLVMBool singleThread);
+LLVMValueRef LLVMBuildAtomicCmpXchg(LLVMBuilderRef B, LLVMValueRef Ptr,
+                                    LLVMValueRef Cmp, LLVMValueRef New,
+                                    LLVMAtomicOrdering SuccessOrdering,
+                                    LLVMAtomicOrdering FailureOrdering,
+                                    LLVMBool SingleThread);
+
+LLVMBool LLVMIsAtomicSingleThread(LLVMValueRef AtomicInst);
+void LLVMSetAtomicSingleThread(LLVMValueRef AtomicInst, LLVMBool SingleThread);
+
+LLVMAtomicOrdering LLVMGetCmpXchgSuccessOrdering(LLVMValueRef CmpXchgInst);
+void LLVMSetCmpXchgSuccessOrdering(LLVMValueRef CmpXchgInst,
+                                   LLVMAtomicOrdering Ordering);
+LLVMAtomicOrdering LLVMGetCmpXchgFailureOrdering(LLVMValueRef CmpXchgInst);
+void LLVMSetCmpXchgFailureOrdering(LLVMValueRef CmpXchgInst,
+                                   LLVMAtomicOrdering Ordering);
 
 /**
  * @}

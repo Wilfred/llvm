@@ -258,7 +258,7 @@ static void createCombinedModuleSummaryIndex() {
     CurrentActivity = "loading file '" + Filename + "'";
     ErrorOr<std::unique_ptr<ModuleSummaryIndex>> IndexOrErr =
         llvm::getModuleSummaryIndexForFile(Filename, diagnosticHandler);
-    error(IndexOrErr, "error: " + CurrentActivity);
+    error(IndexOrErr, "error " + CurrentActivity);
     std::unique_ptr<ModuleSummaryIndex> Index = std::move(IndexOrErr.get());
     CurrentActivity = "";
     // Skip files without a module summary.
@@ -281,7 +281,7 @@ std::vector<std::unique_ptr<MemoryBuffer>>
 loadAllFilesForIndex(const ModuleSummaryIndex &Index) {
   std::vector<std::unique_ptr<MemoryBuffer>> InputBuffers;
 
-  for (auto &ModPath : Index.modPathStringEntries()) {
+  for (auto &ModPath : Index.modulePaths()) {
     const auto &Filename = ModPath.first();
     auto CurrentActivity = "loading file '" + Filename + "'";
     auto InputOrErr = MemoryBuffer::getFile(Filename);
@@ -316,7 +316,7 @@ static void writeModuleToFile(Module &TheModule, StringRef Filename) {
   std::error_code EC;
   raw_fd_ostream OS(Filename, EC, sys::fs::OpenFlags::F_None);
   error(EC, "error opening the file '" + Filename + "'");
-  WriteBitcodeToFile(&TheModule, OS, true, false);
+  WriteBitcodeToFile(&TheModule, OS, /* ShouldPreserveUseListOrder */ true);
 }
 
 class ThinLTOProcessing {

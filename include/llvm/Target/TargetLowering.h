@@ -637,6 +637,14 @@ public:
       getTruncStoreAction(ValVT.getSimpleVT(), MemVT.getSimpleVT()) == Legal;
   }
 
+  /// Return true if the specified store with truncation has solution on this
+  /// target.
+  bool isTruncStoreLegalOrCustom(EVT ValVT, EVT MemVT) const {
+    return isTypeLegal(ValVT) && MemVT.isSimple() &&
+      (getTruncStoreAction(ValVT.getSimpleVT(), MemVT.getSimpleVT()) == Legal ||
+       getTruncStoreAction(ValVT.getSimpleVT(), MemVT.getSimpleVT()) == Custom);
+  }
+
   /// Return how the indexed load should be treated: either it is legal, needs
   /// to be promoted to a larger size, needs to be expanded to some other code
   /// sequence, or the target has a custom expander for it.
@@ -1170,6 +1178,11 @@ public:
   virtual LoadInst *
   lowerIdempotentRMWIntoFencedLoad(AtomicRMWInst *RMWI) const {
     return nullptr;
+  }
+
+  /// Returns true if the platform's atomic operations are sign extended.
+  virtual bool hasSignExtendedAtomicOps() const {
+    return false;
   }
 
   /// Returns true if we should normalize
@@ -2321,11 +2334,14 @@ public:
     bool isByVal    : 1;
     bool isInAlloca : 1;
     bool isReturned : 1;
+    bool isSwiftSelf : 1;
+    bool isSwiftError : 1;
     uint16_t Alignment;
 
     ArgListEntry() : isSExt(false), isZExt(false), isInReg(false),
       isSRet(false), isNest(false), isByVal(false), isInAlloca(false),
-      isReturned(false), Alignment(0) { }
+      isReturned(false), isSwiftSelf(false), isSwiftError(false),
+      Alignment(0) { }
 
     void setAttributes(ImmutableCallSite *CS, unsigned AttrIdx);
   };
@@ -2845,6 +2861,16 @@ public:
   /// \param Result output after conversion
   /// \returns True, if the expansion was successful, false otherwise
   bool expandFP_TO_SINT(SDNode *N, SDValue &Result, SelectionDAG &DAG) const;
+
+  /// Turn load of vector type into a load of the individual elements.
+  /// \param LD load to expand
+  /// \returns MERGE_VALUEs of the scalar loads with their chains.
+  SDValue scalarizeVectorLoad(LoadSDNode *LD, SelectionDAG &DAG) const;
+
+  // Turn a store of a vector type into stores of the individual elements.
+  /// \param ST Store with a vector value type
+  /// \returns MERGE_VALUs of the individual store chains.
+  SDValue scalarizeVectorStore(StoreSDNode *ST, SelectionDAG &DAG) const;
 
   //===--------------------------------------------------------------------===//
   // Instruction Emitting Hooks
