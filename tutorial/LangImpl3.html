@@ -7,7 +7,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>4. Kaleidoscope: Code generation to LLVM IR &mdash; LLVM 3.9 documentation</title>
+    <title>3. Kaleidoscope: Code generation to LLVM IR &mdash; LLVM 3.9 documentation</title>
     
     <link rel="stylesheet" href="../_static/llvm-theme.css" type="text/css" />
     <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
@@ -26,8 +26,8 @@
     <script type="text/javascript" src="../_static/doctools.js"></script>
     <link rel="top" title="LLVM 3.9 documentation" href="../index.html" />
     <link rel="up" title="LLVM Tutorial: Table of Contents" href="index.html" />
-    <link rel="next" title="5. Kaleidoscope: Adding JIT and Optimizer Support" href="LangImpl4.html" />
-    <link rel="prev" title="3. Kaleidoscope: Implementing a Parser and AST" href="LangImpl2.html" />
+    <link rel="next" title="4. Kaleidoscope: Adding JIT and Optimizer Support" href="LangImpl4.html" />
+    <link rel="prev" title="2. Kaleidoscope: Implementing a Parser and AST" href="LangImpl2.html" />
 <style type="text/css">
   table.right { float: right; margin-left: 20px; }
   table.right td { border: 1px solid #ccc; }
@@ -48,10 +48,10 @@
           <a href="../genindex.html" title="General Index"
              accesskey="I">index</a></li>
         <li class="right" >
-          <a href="LangImpl4.html" title="5. Kaleidoscope: Adding JIT and Optimizer Support"
+          <a href="LangImpl4.html" title="4. Kaleidoscope: Adding JIT and Optimizer Support"
              accesskey="N">next</a> |</li>
         <li class="right" >
-          <a href="LangImpl2.html" title="3. Kaleidoscope: Implementing a Parser and AST"
+          <a href="LangImpl2.html" title="2. Kaleidoscope: Implementing a Parser and AST"
              accesskey="P">previous</a> |</li>
   <li><a href="http://llvm.org/">LLVM Home</a>&nbsp;|&nbsp;</li>
   <li><a href="../index.html">Documentation</a>&raquo;</li>
@@ -66,7 +66,7 @@
           <div class="body" role="main">
             
   <div class="section" id="kaleidoscope-code-generation-to-llvm-ir">
-<h1>4. Kaleidoscope: Code generation to LLVM IR<a class="headerlink" href="#kaleidoscope-code-generation-to-llvm-ir" title="Permalink to this headline">¶</a></h1>
+<h1>3. Kaleidoscope: Code generation to LLVM IR<a class="headerlink" href="#kaleidoscope-code-generation-to-llvm-ir" title="Permalink to this headline">¶</a></h1>
 <div class="contents local topic" id="contents">
 <ul class="simple">
 <li><a class="reference internal" href="#chapter-3-introduction" id="id1">Chapter 3 Introduction</a></li>
@@ -78,7 +78,7 @@
 </ul>
 </div>
 <div class="section" id="chapter-3-introduction">
-<h2><a class="toc-backref" href="#id1">4.1. Chapter 3 Introduction</a><a class="headerlink" href="#chapter-3-introduction" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id1">3.1. Chapter 3 Introduction</a><a class="headerlink" href="#chapter-3-introduction" title="Permalink to this headline">¶</a></h2>
 <p>Welcome to Chapter 3 of the &#8220;<a class="reference external" href="index.html">Implementing a language with
 LLVM</a>&#8221; tutorial. This chapter shows you how to transform
 the <a class="reference external" href="LangImpl2.html">Abstract Syntax Tree</a>, built in Chapter 2, into
@@ -93,7 +93,7 @@ documentation included with your release or on the <a class="reference external"
 page</a>.</p>
 </div>
 <div class="section" id="code-generation-setup">
-<h2><a class="toc-backref" href="#id2">4.2. Code Generation Setup</a><a class="headerlink" href="#code-generation-setup" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id2">3.2. Code Generation Setup</a><a class="headerlink" href="#code-generation-setup" title="Permalink to this headline">¶</a></h2>
 <p>In order to generate LLVM IR, we want some simple setup to get started.
 First we define virtual code generation (codegen) methods in each AST
 class:</p>
@@ -132,15 +132,15 @@ pattern</a> or some other
 way to model this. Again, this tutorial won&#8217;t dwell on good software
 engineering practices: for our purposes, adding a virtual method is
 simplest.</p>
-<p>The second thing we want is an &#8220;Error&#8221; method like we used for the
+<p>The second thing we want is an &#8220;LogError&#8221; method like we used for the
 parser, which will be used to report errors found during code generation
 (for example, use of an undeclared parameter):</p>
 <div class="highlight-c++"><div class="highlight"><pre><span></span><span class="k">static</span> <span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">Module</span><span class="o">&gt;</span> <span class="o">*</span><span class="n">TheModule</span><span class="p">;</span>
-<span class="k">static</span> <span class="n">IRBuilder</span><span class="o">&lt;&gt;</span> <span class="n">Builder</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">());</span>
+<span class="k">static</span> <span class="n">IRBuilder</span><span class="o">&lt;&gt;</span> <span class="n">Builder</span><span class="p">(</span><span class="n">LLVMContext</span><span class="p">);</span>
 <span class="k">static</span> <span class="n">std</span><span class="o">::</span><span class="n">map</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="p">,</span> <span class="n">Value</span><span class="o">*&gt;</span> <span class="n">NamedValues</span><span class="p">;</span>
 
-<span class="n">Value</span> <span class="o">*</span><span class="nf">ErrorV</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
-  <span class="n">Error</span><span class="p">(</span><span class="n">Str</span><span class="p">);</span>
+<span class="n">Value</span> <span class="o">*</span><span class="nf">LogErrorV</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
+  <span class="n">LogError</span><span class="p">(</span><span class="n">Str</span><span class="p">);</span>
   <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 <span class="p">}</span>
 </pre></div>
@@ -167,12 +167,12 @@ has been set up to generate code <em>into</em> something. For now, we&#8217;ll a
 that this has already been done, and we&#8217;ll just use it to emit code.</p>
 </div>
 <div class="section" id="expression-code-generation">
-<h2><a class="toc-backref" href="#id3">4.3. Expression Code Generation</a><a class="headerlink" href="#expression-code-generation" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id3">3.3. Expression Code Generation</a><a class="headerlink" href="#expression-code-generation" title="Permalink to this headline">¶</a></h2>
 <p>Generating LLVM code for expression nodes is very straightforward: less
 than 45 lines of commented code for all four of our expression nodes.
 First we&#8217;ll do numeric literals:</p>
 <div class="highlight-c++"><div class="highlight"><pre><span></span><span class="n">Value</span> <span class="o">*</span><span class="n">NumberExprAST</span><span class="o">::</span><span class="n">codegen</span><span class="p">()</span> <span class="p">{</span>
-  <span class="k">return</span> <span class="n">ConstantFP</span><span class="o">::</span><span class="n">get</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">(),</span> <span class="n">APFloat</span><span class="p">(</span><span class="n">Val</span><span class="p">));</span>
+  <span class="k">return</span> <span class="n">ConstantFP</span><span class="o">::</span><span class="n">get</span><span class="p">(</span><span class="n">LLVMContext</span><span class="p">,</span> <span class="n">APFloat</span><span class="p">(</span><span class="n">Val</span><span class="p">));</span>
 <span class="p">}</span>
 </pre></div>
 </div>
@@ -187,7 +187,7 @@ are all uniqued together and shared. For this reason, the API uses the
   <span class="c1">// Look this variable up in the function.</span>
   <span class="n">Value</span> <span class="o">*</span><span class="n">V</span> <span class="o">=</span> <span class="n">NamedValues</span><span class="p">[</span><span class="n">Name</span><span class="p">];</span>
   <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">V</span><span class="p">)</span>
-    <span class="n">ErrorV</span><span class="p">(</span><span class="s">&quot;Unknown variable name&quot;</span><span class="p">);</span>
+    <span class="n">LogErrorV</span><span class="p">(</span><span class="s">&quot;Unknown variable name&quot;</span><span class="p">);</span>
   <span class="k">return</span> <span class="n">V</span><span class="p">;</span>
 <span class="p">}</span>
 </pre></div>
@@ -217,10 +217,10 @@ variables</a>.</p>
   <span class="k">case</span> <span class="sc">&#39;&lt;&#39;</span><span class="o">:</span>
     <span class="n">L</span> <span class="o">=</span> <span class="n">Builder</span><span class="p">.</span><span class="n">CreateFCmpULT</span><span class="p">(</span><span class="n">L</span><span class="p">,</span> <span class="n">R</span><span class="p">,</span> <span class="s">&quot;cmptmp&quot;</span><span class="p">);</span>
     <span class="c1">// Convert bool 0/1 to double 0.0 or 1.0</span>
-    <span class="k">return</span> <span class="n">Builder</span><span class="p">.</span><span class="n">CreateUIToFP</span><span class="p">(</span><span class="n">L</span><span class="p">,</span> <span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">()),</span>
+    <span class="k">return</span> <span class="n">Builder</span><span class="p">.</span><span class="n">CreateUIToFP</span><span class="p">(</span><span class="n">L</span><span class="p">,</span> <span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">LLVMContext</span><span class="p">),</span>
                                 <span class="s">&quot;booltmp&quot;</span><span class="p">);</span>
   <span class="k">default</span><span class="o">:</span>
-    <span class="k">return</span> <span class="n">ErrorV</span><span class="p">(</span><span class="s">&quot;invalid binary operator&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorV</span><span class="p">(</span><span class="s">&quot;invalid binary operator&quot;</span><span class="p">);</span>
   <span class="p">}</span>
 <span class="p">}</span>
 </pre></div>
@@ -260,11 +260,11 @@ would return 0.0 and -1.0, depending on the input value.</p>
   <span class="c1">// Look up the name in the global module table.</span>
   <span class="n">Function</span> <span class="o">*</span><span class="n">CalleeF</span> <span class="o">=</span> <span class="n">TheModule</span><span class="o">-&gt;</span><span class="n">getFunction</span><span class="p">(</span><span class="n">Callee</span><span class="p">);</span>
   <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">CalleeF</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorV</span><span class="p">(</span><span class="s">&quot;Unknown function referenced&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorV</span><span class="p">(</span><span class="s">&quot;Unknown function referenced&quot;</span><span class="p">);</span>
 
   <span class="c1">// If argument mismatch error.</span>
   <span class="k">if</span> <span class="p">(</span><span class="n">CalleeF</span><span class="o">-&gt;</span><span class="n">arg_size</span><span class="p">()</span> <span class="o">!=</span> <span class="n">Args</span><span class="p">.</span><span class="n">size</span><span class="p">())</span>
-    <span class="k">return</span> <span class="n">ErrorV</span><span class="p">(</span><span class="s">&quot;Incorrect # arguments passed&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorV</span><span class="p">(</span><span class="s">&quot;Incorrect # arguments passed&quot;</span><span class="p">);</span>
 
   <span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Value</span> <span class="o">*&gt;</span> <span class="n">ArgsV</span><span class="p">;</span>
   <span class="k">for</span> <span class="p">(</span><span class="kt">unsigned</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">e</span> <span class="o">=</span> <span class="n">Args</span><span class="p">.</span><span class="n">size</span><span class="p">();</span> <span class="n">i</span> <span class="o">!=</span> <span class="n">e</span><span class="p">;</span> <span class="o">++</span><span class="n">i</span><span class="p">)</span> <span class="p">{</span>
@@ -295,7 +295,7 @@ several other interesting instructions that are really easy to plug into
 our basic framework.</p>
 </div>
 <div class="section" id="function-code-generation">
-<h2><a class="toc-backref" href="#id4">4.4. Function Code Generation</a><a class="headerlink" href="#function-code-generation" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id4">3.4. Function Code Generation</a><a class="headerlink" href="#function-code-generation" title="Permalink to this headline">¶</a></h2>
 <p>Code generation for prototypes and functions must handle a number of
 details, which make their code less beautiful than expression code
 generation, but allows us to illustrate some important points. First,
@@ -305,9 +305,9 @@ with:</p>
 <div class="highlight-c++"><div class="highlight"><pre><span></span><span class="n">Function</span> <span class="o">*</span><span class="n">PrototypeAST</span><span class="o">::</span><span class="n">codegen</span><span class="p">()</span> <span class="p">{</span>
   <span class="c1">// Make the function type:  double(double,double) etc.</span>
   <span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Type</span><span class="o">*&gt;</span> <span class="n">Doubles</span><span class="p">(</span><span class="n">Args</span><span class="p">.</span><span class="n">size</span><span class="p">(),</span>
-                             <span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">()));</span>
+                             <span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">LLVMContext</span><span class="p">));</span>
   <span class="n">FunctionType</span> <span class="o">*</span><span class="n">FT</span> <span class="o">=</span>
-    <span class="n">FunctionType</span><span class="o">::</span><span class="n">get</span><span class="p">(</span><span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">()),</span> <span class="n">Doubles</span><span class="p">,</span> <span class="nb">false</span><span class="p">);</span>
+    <span class="n">FunctionType</span><span class="o">::</span><span class="n">get</span><span class="p">(</span><span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">LLVMContext</span><span class="p">),</span> <span class="n">Doubles</span><span class="p">,</span> <span class="nb">false</span><span class="p">);</span>
 
   <span class="n">Function</span> <span class="o">*</span><span class="n">F</span> <span class="o">=</span>
     <span class="n">Function</span><span class="o">::</span><span class="n">Create</span><span class="p">(</span><span class="n">FT</span><span class="p">,</span> <span class="n">Function</span><span class="o">::</span><span class="n">ExternalLinkage</span><span class="p">,</span> <span class="n">Name</span><span class="p">,</span> <span class="n">TheModule</span><span class="p">);</span>
@@ -362,7 +362,7 @@ codegen and attach a function body.</p>
     <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 
   <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">TheFunction</span><span class="o">-&gt;</span><span class="n">empty</span><span class="p">())</span>
-    <span class="k">return</span> <span class="p">(</span><span class="n">Function</span><span class="o">*</span><span class="p">)</span><span class="n">ErrorV</span><span class="p">(</span><span class="s">&quot;Function cannot be redefined.&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">Function</span><span class="o">*</span><span class="p">)</span><span class="n">LogErrorV</span><span class="p">(</span><span class="s">&quot;Function cannot be redefined.&quot;</span><span class="p">);</span>
 </pre></div>
 </div>
 <p>For function definitions, we start by searching TheModule&#8217;s symbol table for an
@@ -371,7 +371,7 @@ existing version of this function, in case one has already been created using an
 exists, so we&#8217;ll codegen one from the Prototype. In either case, we want to
 assert that the function is empty (i.e. has no body yet) before we start.</p>
 <div class="highlight-c++"><div class="highlight"><pre><span></span><span class="c1">// Create a new basic block to start insertion into.</span>
-<span class="n">BasicBlock</span> <span class="o">*</span><span class="n">BB</span> <span class="o">=</span> <span class="n">BasicBlock</span><span class="o">::</span><span class="n">Create</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">(),</span> <span class="s">&quot;entry&quot;</span><span class="p">,</span> <span class="n">TheFunction</span><span class="p">);</span>
+<span class="n">BasicBlock</span> <span class="o">*</span><span class="n">BB</span> <span class="o">=</span> <span class="n">BasicBlock</span><span class="o">::</span><span class="n">Create</span><span class="p">(</span><span class="n">LLVMContext</span><span class="p">,</span> <span class="s">&quot;entry&quot;</span><span class="p">,</span> <span class="n">TheFunction</span><span class="p">);</span>
 <span class="n">Builder</span><span class="p">.</span><span class="n">SetInsertPoint</span><span class="p">(</span><span class="n">BB</span><span class="p">);</span>
 
 <span class="c1">// Record the function arguments in the NamedValues map.</span>
@@ -436,7 +436,7 @@ def foo(b) b;      # Error: Unknown variable name. (decl using &#39;a&#39; takes
 </div>
 </div>
 <div class="section" id="driver-changes-and-closing-thoughts">
-<h2><a class="toc-backref" href="#id5">4.5. Driver Changes and Closing Thoughts</a><a class="headerlink" href="#driver-changes-and-closing-thoughts" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id5">3.5. Driver Changes and Closing Thoughts</a><a class="headerlink" href="#driver-changes-and-closing-thoughts" title="Permalink to this headline">¶</a></h2>
 <p>For now, code generation to LLVM doesn&#8217;t really get us much, except that
 we can look at the pretty IR calls. The sample code inserts calls to
 codegen into the &#8220;<code class="docutils literal"><span class="pre">HandleDefinition</span></code>&#8221;, &#8220;<code class="docutils literal"><span class="pre">HandleExtern</span></code>&#8221; etc
@@ -547,7 +547,7 @@ support</a> to this so we can actually start running
 code!</p>
 </div>
 <div class="section" id="full-code-listing">
-<h2><a class="toc-backref" href="#id6">4.6. Full Code Listing</a><a class="headerlink" href="#full-code-listing" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id6">3.6. Full Code Listing</a><a class="headerlink" href="#full-code-listing" title="Permalink to this headline">¶</a></h2>
 <p>Here is the complete code listing for our running example, enhanced with
 the LLVM code generator. Because this uses the LLVM libraries, we need
 to link them in. To do this, we use the
@@ -751,14 +751,14 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
   <span class="k">return</span> <span class="n">TokPrec</span><span class="p">;</span>
 <span class="p">}</span>
 
-<span class="c1">/// Error* - These are little helper functions for error handling.</span>
-<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">ExprAST</span><span class="o">&gt;</span> <span class="n">Error</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
+<span class="c1">/// LogError* - These are little helper functions for error handling.</span>
+<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">ExprAST</span><span class="o">&gt;</span> <span class="n">LogError</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
   <span class="n">fprintf</span><span class="p">(</span><span class="n">stderr</span><span class="p">,</span> <span class="s">&quot;Error: %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span> <span class="n">Str</span><span class="p">);</span>
   <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 <span class="p">}</span>
 
-<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">PrototypeAST</span><span class="o">&gt;</span> <span class="n">ErrorP</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
-  <span class="n">Error</span><span class="p">(</span><span class="n">Str</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">PrototypeAST</span><span class="o">&gt;</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
+  <span class="n">LogError</span><span class="p">(</span><span class="n">Str</span><span class="p">);</span>
   <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 <span class="p">}</span>
 
@@ -779,7 +779,7 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
     <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;)&#39;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">Error</span><span class="p">(</span><span class="s">&quot;expected &#39;)&#39;&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogError</span><span class="p">(</span><span class="s">&quot;expected &#39;)&#39;&quot;</span><span class="p">);</span>
   <span class="n">getNextToken</span><span class="p">();</span> <span class="c1">// eat ).</span>
   <span class="k">return</span> <span class="n">V</span><span class="p">;</span>
 <span class="p">}</span>
@@ -809,7 +809,7 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
         <span class="k">break</span><span class="p">;</span>
 
       <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;,&#39;</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">Error</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; or &#39;,&#39; in argument list&quot;</span><span class="p">);</span>
+        <span class="k">return</span> <span class="n">LogError</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; or &#39;,&#39; in argument list&quot;</span><span class="p">);</span>
       <span class="n">getNextToken</span><span class="p">();</span>
     <span class="p">}</span>
   <span class="p">}</span>
@@ -827,7 +827,7 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
 <span class="k">static</span> <span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">ExprAST</span><span class="o">&gt;</span> <span class="n">ParsePrimary</span><span class="p">()</span> <span class="p">{</span>
   <span class="k">switch</span> <span class="p">(</span><span class="n">CurTok</span><span class="p">)</span> <span class="p">{</span>
   <span class="k">default</span><span class="o">:</span>
-    <span class="k">return</span> <span class="n">Error</span><span class="p">(</span><span class="s">&quot;unknown token when expecting an expression&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogError</span><span class="p">(</span><span class="s">&quot;unknown token when expecting an expression&quot;</span><span class="p">);</span>
   <span class="k">case</span> <span class="nl">tok_identifier</span><span class="p">:</span>
     <span class="k">return</span> <span class="n">ParseIdentifierExpr</span><span class="p">();</span>
   <span class="k">case</span> <span class="nl">tok_number</span><span class="p">:</span>
@@ -889,19 +889,19 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
 <span class="c1">///   ::= id &#39;(&#39; id* &#39;)&#39;</span>
 <span class="k">static</span> <span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">PrototypeAST</span><span class="o">&gt;</span> <span class="n">ParsePrototype</span><span class="p">()</span> <span class="p">{</span>
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="n">tok_identifier</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorP</span><span class="p">(</span><span class="s">&quot;Expected function name in prototype&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="s">&quot;Expected function name in prototype&quot;</span><span class="p">);</span>
 
   <span class="n">std</span><span class="o">::</span><span class="n">string</span> <span class="n">FnName</span> <span class="o">=</span> <span class="n">IdentifierStr</span><span class="p">;</span>
   <span class="n">getNextToken</span><span class="p">();</span>
 
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;(&#39;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;(&#39; in prototype&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;(&#39; in prototype&quot;</span><span class="p">);</span>
 
   <span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&gt;</span> <span class="n">ArgNames</span><span class="p">;</span>
   <span class="k">while</span> <span class="p">(</span><span class="n">getNextToken</span><span class="p">()</span> <span class="o">==</span> <span class="n">tok_identifier</span><span class="p">)</span>
     <span class="n">ArgNames</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">IdentifierStr</span><span class="p">);</span>
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;)&#39;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; in prototype&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; in prototype&quot;</span><span class="p">);</span>
 
   <span class="c1">// success.</span>
   <span class="n">getNextToken</span><span class="p">();</span> <span class="c1">// eat &#39;)&#39;.</span>
@@ -943,23 +943,24 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
 <span class="c1">//===----------------------------------------------------------------------===//</span>
 
 <span class="k">static</span> <span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">Module</span><span class="o">&gt;</span> <span class="n">TheModule</span><span class="p">;</span>
-<span class="k">static</span> <span class="n">IRBuilder</span><span class="o">&lt;&gt;</span> <span class="n">Builder</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">());</span>
+<span class="k">static</span> <span class="n">LLVMContext</span> <span class="n">TheContext</span><span class="p">;</span>
+<span class="k">static</span> <span class="n">IRBuilder</span><span class="o">&lt;&gt;</span> <span class="n">Builder</span><span class="p">(</span><span class="n">TheContext</span><span class="p">);</span>
 <span class="k">static</span> <span class="n">std</span><span class="o">::</span><span class="n">map</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="p">,</span> <span class="n">Value</span> <span class="o">*&gt;</span> <span class="n">NamedValues</span><span class="p">;</span>
 
-<span class="n">Value</span> <span class="o">*</span><span class="nf">ErrorV</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
-  <span class="n">Error</span><span class="p">(</span><span class="n">Str</span><span class="p">);</span>
+<span class="n">Value</span> <span class="o">*</span><span class="nf">LogErrorV</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
+  <span class="n">LogError</span><span class="p">(</span><span class="n">Str</span><span class="p">);</span>
   <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 <span class="p">}</span>
 
 <span class="n">Value</span> <span class="o">*</span><span class="n">NumberExprAST</span><span class="o">::</span><span class="n">codegen</span><span class="p">()</span> <span class="p">{</span>
-  <span class="k">return</span> <span class="n">ConstantFP</span><span class="o">::</span><span class="n">get</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">(),</span> <span class="n">APFloat</span><span class="p">(</span><span class="n">Val</span><span class="p">));</span>
+  <span class="k">return</span> <span class="n">ConstantFP</span><span class="o">::</span><span class="n">get</span><span class="p">(</span><span class="n">TheContext</span><span class="p">,</span> <span class="n">APFloat</span><span class="p">(</span><span class="n">Val</span><span class="p">));</span>
 <span class="p">}</span>
 
 <span class="n">Value</span> <span class="o">*</span><span class="n">VariableExprAST</span><span class="o">::</span><span class="n">codegen</span><span class="p">()</span> <span class="p">{</span>
   <span class="c1">// Look this variable up in the function.</span>
   <span class="n">Value</span> <span class="o">*</span><span class="n">V</span> <span class="o">=</span> <span class="n">NamedValues</span><span class="p">[</span><span class="n">Name</span><span class="p">];</span>
   <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">V</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorV</span><span class="p">(</span><span class="s">&quot;Unknown variable name&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorV</span><span class="p">(</span><span class="s">&quot;Unknown variable name&quot;</span><span class="p">);</span>
   <span class="k">return</span> <span class="n">V</span><span class="p">;</span>
 <span class="p">}</span>
 
@@ -979,10 +980,9 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
   <span class="k">case</span> <span class="sc">&#39;&lt;&#39;</span><span class="o">:</span>
     <span class="n">L</span> <span class="o">=</span> <span class="n">Builder</span><span class="p">.</span><span class="n">CreateFCmpULT</span><span class="p">(</span><span class="n">L</span><span class="p">,</span> <span class="n">R</span><span class="p">,</span> <span class="s">&quot;cmptmp&quot;</span><span class="p">);</span>
     <span class="c1">// Convert bool 0/1 to double 0.0 or 1.0</span>
-    <span class="k">return</span> <span class="n">Builder</span><span class="p">.</span><span class="n">CreateUIToFP</span><span class="p">(</span><span class="n">L</span><span class="p">,</span> <span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">()),</span>
-                                <span class="s">&quot;booltmp&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">Builder</span><span class="p">.</span><span class="n">CreateUIToFP</span><span class="p">(</span><span class="n">L</span><span class="p">,</span> <span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">TheContext</span><span class="p">),</span> <span class="s">&quot;booltmp&quot;</span><span class="p">);</span>
   <span class="k">default</span><span class="o">:</span>
-    <span class="k">return</span> <span class="n">ErrorV</span><span class="p">(</span><span class="s">&quot;invalid binary operator&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorV</span><span class="p">(</span><span class="s">&quot;invalid binary operator&quot;</span><span class="p">);</span>
   <span class="p">}</span>
 <span class="p">}</span>
 
@@ -990,11 +990,11 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
   <span class="c1">// Look up the name in the global module table.</span>
   <span class="n">Function</span> <span class="o">*</span><span class="n">CalleeF</span> <span class="o">=</span> <span class="n">TheModule</span><span class="o">-&gt;</span><span class="n">getFunction</span><span class="p">(</span><span class="n">Callee</span><span class="p">);</span>
   <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">CalleeF</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorV</span><span class="p">(</span><span class="s">&quot;Unknown function referenced&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorV</span><span class="p">(</span><span class="s">&quot;Unknown function referenced&quot;</span><span class="p">);</span>
 
   <span class="c1">// If argument mismatch error.</span>
   <span class="k">if</span> <span class="p">(</span><span class="n">CalleeF</span><span class="o">-&gt;</span><span class="n">arg_size</span><span class="p">()</span> <span class="o">!=</span> <span class="n">Args</span><span class="p">.</span><span class="n">size</span><span class="p">())</span>
-    <span class="k">return</span> <span class="n">ErrorV</span><span class="p">(</span><span class="s">&quot;Incorrect # arguments passed&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorV</span><span class="p">(</span><span class="s">&quot;Incorrect # arguments passed&quot;</span><span class="p">);</span>
 
   <span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Value</span> <span class="o">*&gt;</span> <span class="n">ArgsV</span><span class="p">;</span>
   <span class="k">for</span> <span class="p">(</span><span class="kt">unsigned</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">e</span> <span class="o">=</span> <span class="n">Args</span><span class="p">.</span><span class="n">size</span><span class="p">();</span> <span class="n">i</span> <span class="o">!=</span> <span class="n">e</span><span class="p">;</span> <span class="o">++</span><span class="n">i</span><span class="p">)</span> <span class="p">{</span>
@@ -1008,10 +1008,9 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
 
 <span class="n">Function</span> <span class="o">*</span><span class="n">PrototypeAST</span><span class="o">::</span><span class="n">codegen</span><span class="p">()</span> <span class="p">{</span>
   <span class="c1">// Make the function type:  double(double,double) etc.</span>
-  <span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Type</span> <span class="o">*&gt;</span> <span class="n">Doubles</span><span class="p">(</span><span class="n">Args</span><span class="p">.</span><span class="n">size</span><span class="p">(),</span>
-                              <span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">()));</span>
+  <span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Type</span> <span class="o">*&gt;</span> <span class="n">Doubles</span><span class="p">(</span><span class="n">Args</span><span class="p">.</span><span class="n">size</span><span class="p">(),</span> <span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">TheContext</span><span class="p">));</span>
   <span class="n">FunctionType</span> <span class="o">*</span><span class="n">FT</span> <span class="o">=</span>
-      <span class="n">FunctionType</span><span class="o">::</span><span class="n">get</span><span class="p">(</span><span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">()),</span> <span class="n">Doubles</span><span class="p">,</span> <span class="nb">false</span><span class="p">);</span>
+      <span class="n">FunctionType</span><span class="o">::</span><span class="n">get</span><span class="p">(</span><span class="n">Type</span><span class="o">::</span><span class="n">getDoubleTy</span><span class="p">(</span><span class="n">TheContext</span><span class="p">),</span> <span class="n">Doubles</span><span class="p">,</span> <span class="nb">false</span><span class="p">);</span>
 
   <span class="n">Function</span> <span class="o">*</span><span class="n">F</span> <span class="o">=</span>
       <span class="n">Function</span><span class="o">::</span><span class="n">Create</span><span class="p">(</span><span class="n">FT</span><span class="p">,</span> <span class="n">Function</span><span class="o">::</span><span class="n">ExternalLinkage</span><span class="p">,</span> <span class="n">Name</span><span class="p">,</span> <span class="n">TheModule</span><span class="p">.</span><span class="n">get</span><span class="p">());</span>
@@ -1035,7 +1034,7 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
     <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 
   <span class="c1">// Create a new basic block to start insertion into.</span>
-  <span class="n">BasicBlock</span> <span class="o">*</span><span class="n">BB</span> <span class="o">=</span> <span class="n">BasicBlock</span><span class="o">::</span><span class="n">Create</span><span class="p">(</span><span class="n">getGlobalContext</span><span class="p">(),</span> <span class="s">&quot;entry&quot;</span><span class="p">,</span> <span class="n">TheFunction</span><span class="p">);</span>
+  <span class="n">BasicBlock</span> <span class="o">*</span><span class="n">BB</span> <span class="o">=</span> <span class="n">BasicBlock</span><span class="o">::</span><span class="n">Create</span><span class="p">(</span><span class="n">TheContext</span><span class="p">,</span> <span class="s">&quot;entry&quot;</span><span class="p">,</span> <span class="n">TheFunction</span><span class="p">);</span>
   <span class="n">Builder</span><span class="p">.</span><span class="n">SetInsertPoint</span><span class="p">(</span><span class="n">BB</span><span class="p">);</span>
 
   <span class="c1">// Record the function arguments in the NamedValues map.</span>
@@ -1139,7 +1138,7 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
   <span class="n">getNextToken</span><span class="p">();</span>
 
   <span class="c1">// Make the module, which holds all the code.</span>
-  <span class="n">TheModule</span> <span class="o">=</span> <span class="n">llvm</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">Module</span><span class="o">&gt;</span><span class="p">(</span><span class="s">&quot;my cool jit&quot;</span><span class="p">,</span> <span class="n">getGlobalContext</span><span class="p">());</span>
+  <span class="n">TheModule</span> <span class="o">=</span> <span class="n">llvm</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">Module</span><span class="o">&gt;</span><span class="p">(</span><span class="s">&quot;my cool jit&quot;</span><span class="p">,</span> <span class="n">TheContext</span><span class="p">);</span>
 
   <span class="c1">// Run the main &quot;interpreter loop&quot; now.</span>
   <span class="n">MainLoop</span><span class="p">();</span>
@@ -1167,10 +1166,10 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
           <a href="../genindex.html" title="General Index"
              >index</a></li>
         <li class="right" >
-          <a href="LangImpl4.html" title="5. Kaleidoscope: Adding JIT and Optimizer Support"
+          <a href="LangImpl4.html" title="4. Kaleidoscope: Adding JIT and Optimizer Support"
              >next</a> |</li>
         <li class="right" >
-          <a href="LangImpl2.html" title="3. Kaleidoscope: Implementing a Parser and AST"
+          <a href="LangImpl2.html" title="2. Kaleidoscope: Implementing a Parser and AST"
              >previous</a> |</li>
   <li><a href="http://llvm.org/">LLVM Home</a>&nbsp;|&nbsp;</li>
   <li><a href="../index.html">Documentation</a>&raquo;</li>
@@ -1180,7 +1179,7 @@ clang++ -g -O3 toy.cpp <span class="sb">`</span>llvm-config --cxxflags --ldflags
     </div>
     <div class="footer" role="contentinfo">
         &copy; Copyright 2003-2016, LLVM Project.
-      Last updated on 2016-03-10.
+      Last updated on 2016-04-19.
       Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.6.
     </div>
   </body>

@@ -25,7 +25,7 @@
     <script type="text/javascript" src="_static/underscore.js"></script>
     <script type="text/javascript" src="_static/doctools.js"></script>
     <link rel="top" title="LLVM 3.9 documentation" href="index.html" />
-    <link rel="next" title="How To Build On ARM" href="HowToBuildOnARM.html" />
+    <link rel="next" title="Advanced Build Configurations" href="AdvancedBuilds.html" />
     <link rel="prev" title="LLVM Language Reference Manual" href="LangRef.html" />
 <style type="text/css">
   table.right { float: right; margin-left: 20px; }
@@ -47,7 +47,7 @@
           <a href="genindex.html" title="General Index"
              accesskey="I">index</a></li>
         <li class="right" >
-          <a href="HowToBuildOnARM.html" title="How To Build On ARM"
+          <a href="AdvancedBuilds.html" title="Advanced Build Configurations"
              accesskey="N">next</a> |</li>
         <li class="right" >
           <a href="LangRef.html" title="LLVM Language Reference Manual"
@@ -75,14 +75,15 @@
 <li><a class="reference internal" href="#llvm-specific-variables" id="id10">LLVM-specific variables</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#executing-the-test-suite" id="id11">Executing the test suite</a></li>
-<li><a class="reference internal" href="#cross-compiling" id="id12">Cross compiling</a></li>
-<li><a class="reference internal" href="#embedding-llvm-in-your-project" id="id13">Embedding LLVM in your project</a><ul>
-<li><a class="reference internal" href="#developing-llvm-passes-out-of-source" id="id14">Developing LLVM passes out of source</a></li>
+<li><a class="reference internal" href="#cmake-caches" id="id11">CMake Caches</a></li>
+<li><a class="reference internal" href="#executing-the-test-suite" id="id12">Executing the test suite</a></li>
+<li><a class="reference internal" href="#cross-compiling" id="id13">Cross compiling</a></li>
+<li><a class="reference internal" href="#embedding-llvm-in-your-project" id="id14">Embedding LLVM in your project</a><ul>
+<li><a class="reference internal" href="#developing-llvm-passes-out-of-source" id="id15">Developing LLVM passes out of source</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#compiler-platform-specific-topics" id="id15">Compiler/Platform-specific topics</a><ul>
-<li><a class="reference internal" href="#microsoft-visual-c" id="id16">Microsoft Visual C++</a></li>
+<li><a class="reference internal" href="#compiler-platform-specific-topics" id="id16">Compiler/Platform-specific topics</a><ul>
+<li><a class="reference internal" href="#microsoft-visual-c" id="id17">Microsoft Visual C++</a></li>
 </ul>
 </li>
 </ul>
@@ -462,11 +463,46 @@ If you want to build LLVM as a shared library, you should use the
 <code class="docutils literal"><span class="pre">LLVM_BUILD_LLVM_DYLIB</span></code> option.</p>
 </div>
 </dd>
+<dt><strong>LLVM_OPTIMIZED_TABLEGEN</strong>:BOOL</dt>
+<dd>If enabled and building a debug or asserts build the CMake build system will
+generate a Release build tree to build a fully optimized tablegen for use
+during the build. Enabling this option can significantly speed up build times
+especially when building LLVM in Debug configurations.</dd>
 </dl>
 </div>
 </div>
+<div class="section" id="cmake-caches">
+<h2><a class="toc-backref" href="#id11">CMake Caches</a><a class="headerlink" href="#cmake-caches" title="Permalink to this headline">¶</a></h2>
+<p>Recently LLVM and Clang have been adding some more complicated build system
+features. Utilizing these new features often involves a complicated chain of
+CMake variables passed on the command line. Clang provides a collection of CMake
+cache scripts to make these features more approachable.</p>
+<p>CMake cache files are utilized using CMake&#8217;s -C flag:</p>
+<div class="highlight-console"><div class="highlight"><pre><span></span><span class="gp">$</span> cmake -C &lt;path to cache file&gt; &lt;path to sources&gt;
+</pre></div>
+</div>
+<p>CMake cache scripts are processed in an isolated scope, only cached variables
+remain set when the main configuration runs. CMake cached variables do not reset
+variables that are already set unless the FORCE option is specified.</p>
+<p>A few notes about CMake Caches:</p>
+<ul class="simple">
+<li>Order of command line arguments is important<ul>
+<li>-D arguments specified before -C are set before the cache is processed and
+can be read inside the cache file</li>
+<li>-D arguments specified after -C are set after the cache is processed and
+are unset inside the cache file</li>
+</ul>
+</li>
+<li>All -D arguments will override cache file settings</li>
+<li>CMAKE_TOOLCHAIN_FILE is evaluated after both the cache file and the command
+line arguments</li>
+<li>It is recommended that all -D options should be specified <em>before</em> -C</li>
+</ul>
+<p>For more information about some of the advanced build configurations supported
+via Cache files see <a class="reference internal" href="AdvancedBuilds.html"><em>Advanced Build Configurations</em></a>.</p>
+</div>
 <div class="section" id="executing-the-test-suite">
-<h2><a class="toc-backref" href="#id11">Executing the test suite</a><a class="headerlink" href="#executing-the-test-suite" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id12">Executing the test suite</a><a class="headerlink" href="#executing-the-test-suite" title="Permalink to this headline">¶</a></h2>
 <p>Testing is performed when the <em>check-all</em> target is built. For instance, if you are
 using Makefiles, execute this command in the root of your build directory:</p>
 <div class="highlight-console"><div class="highlight"><pre><span></span><span class="gp">$</span> make check-all
@@ -476,7 +512,7 @@ using Makefiles, execute this command in the root of your build directory:</p>
 For more information about testing, see the <a class="reference internal" href="TestingGuide.html"><em>LLVM Testing Infrastructure Guide</em></a>.</p>
 </div>
 <div class="section" id="cross-compiling">
-<h2><a class="toc-backref" href="#id12">Cross compiling</a><a class="headerlink" href="#cross-compiling" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id13">Cross compiling</a><a class="headerlink" href="#cross-compiling" title="Permalink to this headline">¶</a></h2>
 <p>See <a class="reference external" href="http://www.vtk.org/Wiki/CMake_Cross_Compiling">this wiki page</a> for
 generic instructions on how to cross-compile with CMake. It goes into detailed
 explanations and may seem daunting, but it is not. On the wiki page there are
@@ -486,7 +522,7 @@ for a quick solution.</p>
 cross-compiling.</p>
 </div>
 <div class="section" id="embedding-llvm-in-your-project">
-<h2><a class="toc-backref" href="#id13">Embedding LLVM in your project</a><a class="headerlink" href="#embedding-llvm-in-your-project" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id14">Embedding LLVM in your project</a><a class="headerlink" href="#embedding-llvm-in-your-project" title="Permalink to this headline">¶</a></h2>
 <p>From LLVM 3.5 onwards both the CMake and autoconf/Makefile build systems export
 LLVM libraries as importable CMake targets. This means that clients of LLVM can
 now reliably use CMake to develop their own LLVM-based projects against an
@@ -572,7 +608,7 @@ components look at the output of running <code class="docutils literal"><span cl
 used instead of <code class="docutils literal"><span class="pre">llvm_map_components_to_libnames()</span></code>. This is now deprecated
 and will be removed in a future version of LLVM.</p>
 <div class="section" id="developing-llvm-passes-out-of-source">
-<span id="cmake-out-of-source-pass"></span><h3><a class="toc-backref" href="#id14">Developing LLVM passes out of source</a><a class="headerlink" href="#developing-llvm-passes-out-of-source" title="Permalink to this headline">¶</a></h3>
+<span id="cmake-out-of-source-pass"></span><h3><a class="toc-backref" href="#id15">Developing LLVM passes out of source</a><a class="headerlink" href="#developing-llvm-passes-out-of-source" title="Permalink to this headline">¶</a></h3>
 <p>It is possible to develop LLVM passes out of LLVM&#8217;s source tree (i.e. against an
 installed or built LLVM). An example of a project layout is provided below.</p>
 <div class="highlight-none"><div class="highlight"><pre><span></span>&lt;project dir&gt;/
@@ -623,10 +659,10 @@ into the LLVM source tree. You can achieve it in two easy steps:</p>
 </div>
 </div>
 <div class="section" id="compiler-platform-specific-topics">
-<h2><a class="toc-backref" href="#id15">Compiler/Platform-specific topics</a><a class="headerlink" href="#compiler-platform-specific-topics" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id16">Compiler/Platform-specific topics</a><a class="headerlink" href="#compiler-platform-specific-topics" title="Permalink to this headline">¶</a></h2>
 <p>Notes for specific compilers and/or platforms.</p>
 <div class="section" id="microsoft-visual-c">
-<h3><a class="toc-backref" href="#id16">Microsoft Visual C++</a><a class="headerlink" href="#microsoft-visual-c" title="Permalink to this headline">¶</a></h3>
+<h3><a class="toc-backref" href="#id17">Microsoft Visual C++</a><a class="headerlink" href="#microsoft-visual-c" title="Permalink to this headline">¶</a></h3>
 <dl class="docutils">
 <dt><strong>LLVM_COMPILER_JOBS</strong>:STRING</dt>
 <dd>Specifies the maximum number of parallel compiler jobs to use per project
@@ -649,7 +685,7 @@ Studio 2010 CMake generator. 0 means use all processors. Default is 0.</dd>
           <a href="genindex.html" title="General Index"
              >index</a></li>
         <li class="right" >
-          <a href="HowToBuildOnARM.html" title="How To Build On ARM"
+          <a href="AdvancedBuilds.html" title="Advanced Build Configurations"
              >next</a> |</li>
         <li class="right" >
           <a href="LangRef.html" title="LLVM Language Reference Manual"
@@ -661,7 +697,7 @@ Studio 2010 CMake generator. 0 means use all processors. Default is 0.</dd>
     </div>
     <div class="footer" role="contentinfo">
         &copy; Copyright 2003-2016, LLVM Project.
-      Last updated on 2016-03-10.
+      Last updated on 2016-04-19.
       Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.6.
     </div>
   </body>

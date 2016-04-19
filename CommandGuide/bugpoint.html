@@ -79,7 +79,7 @@ can be used to debug three types of failures: optimizer crashes, miscompilations
 by optimizers, or bad native code generation (including problems in the static
 and JIT compilers).  It aims to reduce large test cases to small, useful ones.
 For more information on the design and inner workings of <strong>bugpoint</strong>, as well as
-advice for using bugpoint, see <em>llvm/docs/Bugpoint.html</em> in the LLVM
+advice for using bugpoint, see <a class="reference internal" href="../Bugpoint.html"><em>LLVM bugpoint tool: design and usage</em></a> in the LLVM
 distribution.</p>
 </div>
 <div class="section" id="options">
@@ -193,7 +193,11 @@ be useful for cross-compilation.</div></blockquote>
 <p><strong>&#8211;compile-command</strong> <em>command</em></p>
 <blockquote>
 <div><p>This option defines the command to use with the <strong>&#8211;compile-custom</strong>
-option to compile the bitcode testcase. This can be useful for
+option to compile the bitcode testcase. The command should exit with a
+failure exit code if the file is &#8220;interesting&#8221; and should exit with a
+success exit code (i.e. 0) otherwise (this is the same as if it crashed on
+&#8220;interesting&#8221; inputs).</p>
+<p>This can be useful for
 testing compiler output without running any link or execute stages. To
 generate a reduced unit test, you may add CHECK directives to the
 testcase and pass the name of an executable compile-command script in this form:</p>
@@ -247,7 +251,7 @@ if an error occurs, it will exit with a non-zero value.</p>
     </div>
     <div class="footer" role="contentinfo">
         &copy; Copyright 2003-2016, LLVM Project.
-      Last updated on 2016-03-10.
+      Last updated on 2016-04-19.
       Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.6.
     </div>
   </body>

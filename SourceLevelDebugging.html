@@ -328,7 +328,7 @@ attributes #1 = { nounwind readnone }
 !llvm.module.flags = !{!7, !8, !9}
 !llvm.ident = !{!10}
 
-!0 = !DICompileUnit(language: DW_LANG_C99, file: !1, producer: &quot;clang version 3.7.0 (trunk 231150) (llvm/trunk 231154)&quot;, isOptimized: false, runtimeVersion: 0, emissionKind: 1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
+!0 = !DICompileUnit(language: DW_LANG_C99, file: !1, producer: &quot;clang version 3.7.0 (trunk 231150) (llvm/trunk 231154)&quot;, isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
 !1 = !DIFile(filename: &quot;/dev/stdin&quot;, directory: &quot;/Users/dexonsmith/data/llvm/debug-info&quot;)
 !2 = !{}
 !3 = !{!4}
@@ -450,7 +450,7 @@ instruction.  One can extract line number information encoded in LLVM IR using
 !0 = !DICompileUnit(language: DW_LANG_C99, file: !1,
                     producer:
                     &quot;clang version 3.7.0 (trunk 231150) (llvm/trunk 231154)&quot;,
-                    isOptimized: false, runtimeVersion: 0, emissionKind: 1,
+                    isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug,
                     enums: !2, retainedTypes: !2, subprograms: !2, globals:
                     !3, imports: !2)
 
@@ -1366,7 +1366,7 @@ names as follows:</p>
     </div>
     <div class="footer" role="contentinfo">
         &copy; Copyright 2003-2016, LLVM Project.
-      Last updated on 2016-03-10.
+      Last updated on 2016-04-19.
       Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.6.
     </div>
   </body>

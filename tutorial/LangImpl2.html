@@ -7,7 +7,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>3. Kaleidoscope: Implementing a Parser and AST &mdash; LLVM 3.9 documentation</title>
+    <title>2. Kaleidoscope: Implementing a Parser and AST &mdash; LLVM 3.9 documentation</title>
     
     <link rel="stylesheet" href="../_static/llvm-theme.css" type="text/css" />
     <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
@@ -26,8 +26,8 @@
     <script type="text/javascript" src="../_static/doctools.js"></script>
     <link rel="top" title="LLVM 3.9 documentation" href="../index.html" />
     <link rel="up" title="LLVM Tutorial: Table of Contents" href="index.html" />
-    <link rel="next" title="4. Kaleidoscope: Code generation to LLVM IR" href="LangImpl3.html" />
-    <link rel="prev" title="2. Kaleidoscope: Conclusion and other useful LLVM tidbits" href="LangImpl10.html" />
+    <link rel="next" title="3. Kaleidoscope: Code generation to LLVM IR" href="LangImpl3.html" />
+    <link rel="prev" title="1. Kaleidoscope: Tutorial Introduction and the Lexer" href="LangImpl1.html" />
 <style type="text/css">
   table.right { float: right; margin-left: 20px; }
   table.right td { border: 1px solid #ccc; }
@@ -48,10 +48,10 @@
           <a href="../genindex.html" title="General Index"
              accesskey="I">index</a></li>
         <li class="right" >
-          <a href="LangImpl3.html" title="4. Kaleidoscope: Code generation to LLVM IR"
+          <a href="LangImpl3.html" title="3. Kaleidoscope: Code generation to LLVM IR"
              accesskey="N">next</a> |</li>
         <li class="right" >
-          <a href="LangImpl10.html" title="2. Kaleidoscope: Conclusion and other useful LLVM tidbits"
+          <a href="LangImpl1.html" title="1. Kaleidoscope: Tutorial Introduction and the Lexer"
              accesskey="P">previous</a> |</li>
   <li><a href="http://llvm.org/">LLVM Home</a>&nbsp;|&nbsp;</li>
   <li><a href="../index.html">Documentation</a>&raquo;</li>
@@ -66,7 +66,7 @@
           <div class="body" role="main">
             
   <div class="section" id="kaleidoscope-implementing-a-parser-and-ast">
-<h1>3. Kaleidoscope: Implementing a Parser and AST<a class="headerlink" href="#kaleidoscope-implementing-a-parser-and-ast" title="Permalink to this headline">¶</a></h1>
+<h1>2. Kaleidoscope: Implementing a Parser and AST<a class="headerlink" href="#kaleidoscope-implementing-a-parser-and-ast" title="Permalink to this headline">¶</a></h1>
 <div class="contents local topic" id="contents">
 <ul class="simple">
 <li><a class="reference internal" href="#chapter-2-introduction" id="id2">Chapter 2 Introduction</a></li>
@@ -81,7 +81,7 @@
 </ul>
 </div>
 <div class="section" id="chapter-2-introduction">
-<h2><a class="toc-backref" href="#id2">3.1. Chapter 2 Introduction</a><a class="headerlink" href="#chapter-2-introduction" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id2">2.1. Chapter 2 Introduction</a><a class="headerlink" href="#chapter-2-introduction" title="Permalink to this headline">¶</a></h2>
 <p>Welcome to Chapter 2 of the &#8220;<a class="reference external" href="index.html">Implementing a language with
 LLVM</a>&#8221; tutorial. This chapter shows you how to use the
 lexer, built in <a class="reference external" href="LangImpl1.html">Chapter 1</a>, to build a full
@@ -97,7 +97,7 @@ the former for everything else). Before we get to parsing though, lets
 talk about the output of the parser: the Abstract Syntax Tree.</p>
 </div>
 <div class="section" id="the-abstract-syntax-tree-ast">
-<h2><a class="toc-backref" href="#id3">3.2. The Abstract Syntax Tree (AST)</a><a class="headerlink" href="#the-abstract-syntax-tree-ast" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id3">2.2. The Abstract Syntax Tree (AST)</a><a class="headerlink" href="#the-abstract-syntax-tree-ast" title="Permalink to this headline">¶</a></h2>
 <p>The AST for a program captures its behavior in such a way that it is
 easy for later stages of the compiler (e.g. code generation) to
 interpret. We basically want one object for each construct in the
@@ -205,7 +205,7 @@ have a type field.</p>
 function bodies in Kaleidoscope.</p>
 </div>
 <div class="section" id="parser-basics">
-<h2><a class="toc-backref" href="#id4">3.3. Parser Basics</a><a class="headerlink" href="#parser-basics" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id4">2.3. Parser Basics</a><a class="headerlink" href="#parser-basics" title="Permalink to this headline">¶</a></h2>
 <p>Now that we have an AST to build, we need to define the parser code to
 build it. The idea here is that we want to parse something like &#8220;x+y&#8221;
 (which is returned as three tokens by the lexer) into an AST that could
@@ -230,18 +230,18 @@ be generated with calls like this:</p>
 to look one token ahead at what the lexer is returning. Every function
 in our parser will assume that CurTok is the current token that needs to
 be parsed.</p>
-<div class="highlight-c++"><div class="highlight"><pre><span></span><span class="c1">/// Error* - These are little helper functions for error handling.</span>
-<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">ExprAST</span><span class="o">&gt;</span> <span class="n">Error</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
-  <span class="n">fprintf</span><span class="p">(</span><span class="n">stderr</span><span class="p">,</span> <span class="s">&quot;Error: %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span> <span class="n">Str</span><span class="p">);</span>
+<div class="highlight-c++"><div class="highlight"><pre><span></span><span class="c1">/// LogError* - These are little helper functions for error handling.</span>
+<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">ExprAST</span><span class="o">&gt;</span> <span class="n">LogError</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
+  <span class="n">fprintf</span><span class="p">(</span><span class="n">stderr</span><span class="p">,</span> <span class="s">&quot;LogError: %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span> <span class="n">Str</span><span class="p">);</span>
   <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 <span class="p">}</span>
-<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">PrototypeAST</span><span class="o">&gt;</span> <span class="n">ErrorP</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
-  <span class="n">Error</span><span class="p">(</span><span class="n">Str</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">PrototypeAST</span><span class="o">&gt;</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
+  <span class="n">LogError</span><span class="p">(</span><span class="n">Str</span><span class="p">);</span>
   <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 <span class="p">}</span>
 </pre></div>
 </div>
-<p>The <code class="docutils literal"><span class="pre">Error</span></code> routines are simple helper routines that our parser will
+<p>The <code class="docutils literal"><span class="pre">LogError</span></code> routines are simple helper routines that our parser will
 use to handle errors. The error recovery in our parser will not be the
 best and is not particular user-friendly, but it will be enough for our
 tutorial. These routines make it easier to handle errors in routines
@@ -250,7 +250,7 @@ that have various return types: they always return null.</p>
 our grammar: numeric literals.</p>
 </div>
 <div class="section" id="basic-expression-parsing">
-<h2><a class="toc-backref" href="#id5">3.4. Basic Expression Parsing</a><a class="headerlink" href="#basic-expression-parsing" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id5">2.4. Basic Expression Parsing</a><a class="headerlink" href="#basic-expression-parsing" title="Permalink to this headline">¶</a></h2>
 <p>We start with numeric literals, because they are the simplest to
 process. For each production in our grammar, we&#8217;ll define a function
 which parses that production. For numeric literals, we have:</p>
@@ -280,7 +280,7 @@ the parenthesis operator is defined like this:</p>
     <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;)&#39;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">Error</span><span class="p">(</span><span class="s">&quot;expected &#39;)&#39;&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogError</span><span class="p">(</span><span class="s">&quot;expected &#39;)&#39;&quot;</span><span class="p">);</span>
   <span class="n">getNextToken</span><span class="p">();</span> <span class="c1">// eat ).</span>
   <span class="k">return</span> <span class="n">V</span><span class="p">;</span>
 <span class="p">}</span>
@@ -288,7 +288,7 @@ the parenthesis operator is defined like this:</p>
 </div>
 <p>This function illustrates a number of interesting things about the
 parser:</p>
-<p>1) It shows how we use the Error routines. When called, this function
+<p>1) It shows how we use the LogError routines. When called, this function
 expects that the current token is a &#8216;(&#8216; token, but after parsing the
 subexpression, it is possible that there is no &#8216;)&#8217; waiting. For example,
 if the user types in &#8220;(4 x&#8221; instead of &#8220;(4)&#8221;, the parser should emit an
@@ -330,7 +330,7 @@ function calls:</p>
         <span class="k">break</span><span class="p">;</span>
 
       <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;,&#39;</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">Error</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; or &#39;,&#39; in argument list&quot;</span><span class="p">);</span>
+        <span class="k">return</span> <span class="n">LogError</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; or &#39;,&#39; in argument list&quot;</span><span class="p">);</span>
       <span class="n">getNextToken</span><span class="p">();</span>
     <span class="p">}</span>
   <span class="p">}</span>
@@ -363,7 +363,7 @@ primary expression, we need to determine what sort of expression it is:</p>
 <span class="k">static</span> <span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">ExprAST</span><span class="o">&gt;</span> <span class="n">ParsePrimary</span><span class="p">()</span> <span class="p">{</span>
   <span class="k">switch</span> <span class="p">(</span><span class="n">CurTok</span><span class="p">)</span> <span class="p">{</span>
   <span class="k">default</span><span class="o">:</span>
-    <span class="k">return</span> <span class="n">Error</span><span class="p">(</span><span class="s">&quot;unknown token when expecting an expression&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogError</span><span class="p">(</span><span class="s">&quot;unknown token when expecting an expression&quot;</span><span class="p">);</span>
   <span class="k">case</span> <span class="nl">tok_identifier</span><span class="p">:</span>
     <span class="k">return</span> <span class="n">ParseIdentifierExpr</span><span class="p">();</span>
   <span class="k">case</span> <span class="nl">tok_number</span><span class="p">:</span>
@@ -382,7 +382,7 @@ then parses it with a function call.</p>
 expressions. They are a bit more complex.</p>
 </div>
 <div class="section" id="binary-expression-parsing">
-<h2><a class="toc-backref" href="#id6">3.5. Binary Expression Parsing</a><a class="headerlink" href="#binary-expression-parsing" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id6">2.5. Binary Expression Parsing</a><a class="headerlink" href="#binary-expression-parsing" title="Permalink to this headline">¶</a></h2>
 <p>Binary expressions are significantly harder to parse because they are
 often ambiguous. For example, when given the string &#8220;x+y*z&#8221;, the parser
 can choose to parse it as either &#8220;(x+y)*z&#8221; or &#8220;x+(y*z)&#8221;. With common
@@ -573,7 +573,7 @@ stopping at the first token that is not part of the expression. Next up
 we need to handle function definitions, etc.</p>
 </div>
 <div class="section" id="parsing-the-rest">
-<h2><a class="toc-backref" href="#id7">3.6. Parsing the Rest</a><a class="headerlink" href="#parsing-the-rest" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id7">2.6. Parsing the Rest</a><a class="headerlink" href="#parsing-the-rest" title="Permalink to this headline">¶</a></h2>
 <p>The next thing missing is handling of function prototypes. In
 Kaleidoscope, these are used both for &#8216;extern&#8217; function declarations as
 well as function body definitions. The code to do this is
@@ -583,20 +583,20 @@ expressions):</p>
 <span class="c1">///   ::= id &#39;(&#39; id* &#39;)&#39;</span>
 <span class="k">static</span> <span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">PrototypeAST</span><span class="o">&gt;</span> <span class="n">ParsePrototype</span><span class="p">()</span> <span class="p">{</span>
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="n">tok_identifier</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorP</span><span class="p">(</span><span class="s">&quot;Expected function name in prototype&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="s">&quot;Expected function name in prototype&quot;</span><span class="p">);</span>
 
   <span class="n">std</span><span class="o">::</span><span class="n">string</span> <span class="n">FnName</span> <span class="o">=</span> <span class="n">IdentifierStr</span><span class="p">;</span>
   <span class="n">getNextToken</span><span class="p">();</span>
 
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;(&#39;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;(&#39; in prototype&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;(&#39; in prototype&quot;</span><span class="p">);</span>
 
   <span class="c1">// Read the list of argument names.</span>
   <span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&gt;</span> <span class="n">ArgNames</span><span class="p">;</span>
   <span class="k">while</span> <span class="p">(</span><span class="n">getNextToken</span><span class="p">()</span> <span class="o">==</span> <span class="n">tok_identifier</span><span class="p">)</span>
     <span class="n">ArgNames</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">IdentifierStr</span><span class="p">);</span>
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;)&#39;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; in prototype&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; in prototype&quot;</span><span class="p">);</span>
 
   <span class="c1">// success.</span>
   <span class="n">getNextToken</span><span class="p">();</span>  <span class="c1">// eat &#39;)&#39;.</span>
@@ -647,7 +647,7 @@ nullary (zero argument) functions for them:</p>
 let us actually <em>execute</em> this code we&#8217;ve built!</p>
 </div>
 <div class="section" id="the-driver">
-<h2><a class="toc-backref" href="#id8">3.7. The Driver</a><a class="headerlink" href="#the-driver" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id8">2.7. The Driver</a><a class="headerlink" href="#the-driver" title="Permalink to this headline">¶</a></h2>
 <p>The driver for this simply invokes all of the parsing pieces with a
 top-level dispatch loop. There isn&#8217;t much interesting here, so I&#8217;ll just
 include the top-level loop. See <a class="reference external" href="#full-code-listing">below</a> for full code in the
@@ -686,7 +686,7 @@ the expression. Having top-level semicolons allows you to type &#8220;4+5;&#8221
 and the parser will know you are done.</p>
 </div>
 <div class="section" id="conclusions">
-<h2><a class="toc-backref" href="#id9">3.8. Conclusions</a><a class="headerlink" href="#conclusions" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id9">2.8. Conclusions</a><a class="headerlink" href="#conclusions" title="Permalink to this headline">¶</a></h2>
 <p>With just under 400 lines of commented code (240 lines of non-comment,
 non-blank code), we fully defined our minimal language, including a
 lexer, parser, and AST builder. With this done, the executable will
@@ -713,7 +713,7 @@ installment</a>, we will describe how to generate LLVM
 Intermediate Representation (IR) from the AST.</p>
 </div>
 <div class="section" id="full-code-listing">
-<h2><a class="toc-backref" href="#id10">3.9. Full Code Listing</a><a class="headerlink" href="#full-code-listing" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id10">2.9. Full Code Listing</a><a class="headerlink" href="#full-code-listing" title="Permalink to this headline">¶</a></h2>
 <p>Here is the complete code listing for this and the previous chapter.
 Note that it is fully self-contained: you don&#8217;t need LLVM or any
 external libraries at all for this. (Besides the C and C++ standard
@@ -914,13 +914,13 @@ clang++ -g -O3 toy.cpp
   <span class="k">return</span> <span class="n">TokPrec</span><span class="p">;</span>
 <span class="p">}</span>
 
-<span class="c1">/// Error* - These are little helper functions for error handling.</span>
-<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">ExprAST</span><span class="o">&gt;</span> <span class="n">Error</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
+<span class="c1">/// LogError* - These are little helper functions for error handling.</span>
+<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">ExprAST</span><span class="o">&gt;</span> <span class="n">LogError</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
   <span class="n">fprintf</span><span class="p">(</span><span class="n">stderr</span><span class="p">,</span> <span class="s">&quot;Error: %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span> <span class="n">Str</span><span class="p">);</span>
   <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 <span class="p">}</span>
-<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">PrototypeAST</span><span class="o">&gt;</span> <span class="n">ErrorP</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
-  <span class="n">Error</span><span class="p">(</span><span class="n">Str</span><span class="p">);</span>
+<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">PrototypeAST</span><span class="o">&gt;</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">Str</span><span class="p">)</span> <span class="p">{</span>
+  <span class="n">LogError</span><span class="p">(</span><span class="n">Str</span><span class="p">);</span>
   <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 <span class="p">}</span>
 
@@ -941,7 +941,7 @@ clang++ -g -O3 toy.cpp
     <span class="k">return</span> <span class="k">nullptr</span><span class="p">;</span>
 
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;)&#39;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">Error</span><span class="p">(</span><span class="s">&quot;expected &#39;)&#39;&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogError</span><span class="p">(</span><span class="s">&quot;expected &#39;)&#39;&quot;</span><span class="p">);</span>
   <span class="n">getNextToken</span><span class="p">();</span> <span class="c1">// eat ).</span>
   <span class="k">return</span> <span class="n">V</span><span class="p">;</span>
 <span class="p">}</span>
@@ -971,7 +971,7 @@ clang++ -g -O3 toy.cpp
         <span class="k">break</span><span class="p">;</span>
 
       <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;,&#39;</span><span class="p">)</span>
-        <span class="k">return</span> <span class="n">Error</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; or &#39;,&#39; in argument list&quot;</span><span class="p">);</span>
+        <span class="k">return</span> <span class="n">LogError</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; or &#39;,&#39; in argument list&quot;</span><span class="p">);</span>
       <span class="n">getNextToken</span><span class="p">();</span>
     <span class="p">}</span>
   <span class="p">}</span>
@@ -989,7 +989,7 @@ clang++ -g -O3 toy.cpp
 <span class="k">static</span> <span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">ExprAST</span><span class="o">&gt;</span> <span class="n">ParsePrimary</span><span class="p">()</span> <span class="p">{</span>
   <span class="k">switch</span> <span class="p">(</span><span class="n">CurTok</span><span class="p">)</span> <span class="p">{</span>
   <span class="k">default</span><span class="o">:</span>
-    <span class="k">return</span> <span class="n">Error</span><span class="p">(</span><span class="s">&quot;unknown token when expecting an expression&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogError</span><span class="p">(</span><span class="s">&quot;unknown token when expecting an expression&quot;</span><span class="p">);</span>
   <span class="k">case</span> <span class="nl">tok_identifier</span><span class="p">:</span>
     <span class="k">return</span> <span class="n">ParseIdentifierExpr</span><span class="p">();</span>
   <span class="k">case</span> <span class="nl">tok_number</span><span class="p">:</span>
@@ -1051,19 +1051,19 @@ clang++ -g -O3 toy.cpp
 <span class="c1">///   ::= id &#39;(&#39; id* &#39;)&#39;</span>
 <span class="k">static</span> <span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">PrototypeAST</span><span class="o">&gt;</span> <span class="n">ParsePrototype</span><span class="p">()</span> <span class="p">{</span>
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="n">tok_identifier</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorP</span><span class="p">(</span><span class="s">&quot;Expected function name in prototype&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="s">&quot;Expected function name in prototype&quot;</span><span class="p">);</span>
 
   <span class="n">std</span><span class="o">::</span><span class="n">string</span> <span class="n">FnName</span> <span class="o">=</span> <span class="n">IdentifierStr</span><span class="p">;</span>
   <span class="n">getNextToken</span><span class="p">();</span>
 
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;(&#39;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;(&#39; in prototype&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;(&#39; in prototype&quot;</span><span class="p">);</span>
 
   <span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&gt;</span> <span class="n">ArgNames</span><span class="p">;</span>
   <span class="k">while</span> <span class="p">(</span><span class="n">getNextToken</span><span class="p">()</span> <span class="o">==</span> <span class="n">tok_identifier</span><span class="p">)</span>
     <span class="n">ArgNames</span><span class="p">.</span><span class="n">push_back</span><span class="p">(</span><span class="n">IdentifierStr</span><span class="p">);</span>
   <span class="k">if</span> <span class="p">(</span><span class="n">CurTok</span> <span class="o">!=</span> <span class="sc">&#39;)&#39;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">ErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; in prototype&quot;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">LogErrorP</span><span class="p">(</span><span class="s">&quot;Expected &#39;)&#39; in prototype&quot;</span><span class="p">);</span>
 
   <span class="c1">// success.</span>
   <span class="n">getNextToken</span><span class="p">();</span> <span class="c1">// eat &#39;)&#39;.</span>
@@ -1194,10 +1194,10 @@ clang++ -g -O3 toy.cpp
           <a href="../genindex.html" title="General Index"
              >index</a></li>
         <li class="right" >
-          <a href="LangImpl3.html" title="4. Kaleidoscope: Code generation to LLVM IR"
+          <a href="LangImpl3.html" title="3. Kaleidoscope: Code generation to LLVM IR"
              >next</a> |</li>
         <li class="right" >
-          <a href="LangImpl10.html" title="2. Kaleidoscope: Conclusion and other useful LLVM tidbits"
+          <a href="LangImpl1.html" title="1. Kaleidoscope: Tutorial Introduction and the Lexer"
              >previous</a> |</li>
   <li><a href="http://llvm.org/">LLVM Home</a>&nbsp;|&nbsp;</li>
   <li><a href="../index.html">Documentation</a>&raquo;</li>
@@ -1207,7 +1207,7 @@ clang++ -g -O3 toy.cpp
     </div>
     <div class="footer" role="contentinfo">
         &copy; Copyright 2003-2016, LLVM Project.
-      Last updated on 2016-03-10.
+      Last updated on 2016-04-19.
       Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.6.
     </div>
   </body>

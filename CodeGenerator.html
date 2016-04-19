@@ -227,7 +227,7 @@ classes are intended to be abstract enough to represent the machine code for
 <em>any</em> target machine.  These classes are defined in
 <code class="docutils literal"><span class="pre">include/llvm/CodeGen/</span></code>. At this level, concepts like &#8220;constant pool
 entries&#8221; and &#8220;jump tables&#8221; are explicitly exposed.</li>
-<li>Classes and algorithms used to represent code as the object file level, the
+<li>Classes and algorithms used to represent code at the object file level, the
 <a class="reference internal" href="#mc-layer">MC Layer</a>.  These classes represent assembly level constructs like labels,
 sections, and instructions.  At this level, concepts like &#8220;constant pool
 entries&#8221; and &#8220;jump tables&#8221; don&#8217;t exist.</li>
@@ -714,7 +714,7 @@ higher level LLVM IR and Machine* constructs down to the MC layer, emitting
 directives through MCStreamer.</p>
 <p>On the implementation side of MCStreamer, there are two major implementations:
 one for writing out a .s file (MCAsmStreamer), and one for writing out a .o
-file (MCObjectStreamer).  MCAsmStreamer is a straight-forward implementation
+file (MCObjectStreamer).  MCAsmStreamer is a straightforward implementation
 that prints out a directive for each method (e.g. <code class="docutils literal"><span class="pre">EmitValue</span> <span class="pre">-&gt;</span> <span class="pre">.byte</span></code>), but
 MCObjectStreamer implements a full assembler.</p>
 <p>For target specific directives, the MCStreamer has a MCTargetStreamer instance.
@@ -2475,7 +2475,7 @@ to ensure valid register usage and operand types.</p>
     </div>
     <div class="footer" role="contentinfo">
         &copy; Copyright 2003-2016, LLVM Project.
-      Last updated on 2016-03-10.
+      Last updated on 2016-04-19.
       Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.6.
     </div>
   </body>

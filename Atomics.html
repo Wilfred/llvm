@@ -86,16 +86,12 @@
 </div>
 <div class="section" id="introduction">
 <h2><a class="toc-backref" href="#id4">Introduction</a><a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
-<p>Historically, LLVM has not had very strong support for concurrency; some minimal
-intrinsics were provided, and <code class="docutils literal"><span class="pre">volatile</span></code> was used in some cases to achieve
-rough semantics in the presence of concurrency.  However, this is changing;
-there are now new instructions which are well-defined in the presence of threads
-and asynchronous signals, and the model for existing instructions has been
-clarified in the IR.</p>
+<p>LLVM supports instructions which are well-defined in the presence of threads and
+asynchronous signals.</p>
 <p>The atomic instructions are designed specifically to provide readable IR and
 optimized code generation for the following:</p>
 <ul class="simple">
-<li>The new C++11 <code class="docutils literal"><span class="pre">&lt;atomic&gt;</span></code> header.  (<a class="reference external" href="http://www.open-std.org/jtc1/sc22/wg21/">C++11 draft available here</a>.) (<a class="reference external" href="http://www.open-std.org/jtc1/sc22/wg14/">C11 draft available here</a>.)</li>
+<li>The C++11 <code class="docutils literal"><span class="pre">&lt;atomic&gt;</span></code> header.  (<a class="reference external" href="http://www.open-std.org/jtc1/sc22/wg21/">C++11 draft available here</a>.) (<a class="reference external" href="http://www.open-std.org/jtc1/sc22/wg14/">C11 draft available here</a>.)</li>
 <li>Proper semantics for Java-style memory, for both <code class="docutils literal"><span class="pre">volatile</span></code> and regular
 shared variables. (<a class="reference external" href="http://docs.oracle.com/javase/specs/jls/se8/html/jls-17.html">Java Specification</a>)</li>
 <li>gcc-compatible <code class="docutils literal"><span class="pre">__sync_*</span></code> builtins. (<a class="reference external" href="https://gcc.gnu.org/onlinedocs/gcc/_005f_005fsync-Builtins.html">Description</a>)</li>
@@ -499,7 +495,7 @@ by overriding <code class="docutils literal"><span class="pre">expandAtomicRMWIn
     </div>
     <div class="footer" role="contentinfo">
         &copy; Copyright 2003-2016, LLVM Project.
-      Last updated on 2016-03-10.
+      Last updated on 2016-04-19.
       Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.6.
     </div>
   </body>

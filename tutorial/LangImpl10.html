@@ -7,7 +7,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>2. Kaleidoscope: Conclusion and other useful LLVM tidbits &mdash; LLVM 3.9 documentation</title>
+    <title>10. Kaleidoscope: Conclusion and other useful LLVM tidbits &mdash; LLVM 3.9 documentation</title>
     
     <link rel="stylesheet" href="../_static/llvm-theme.css" type="text/css" />
     <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
@@ -26,8 +26,8 @@
     <script type="text/javascript" src="../_static/doctools.js"></script>
     <link rel="top" title="LLVM 3.9 documentation" href="../index.html" />
     <link rel="up" title="LLVM Tutorial: Table of Contents" href="index.html" />
-    <link rel="next" title="3. Kaleidoscope: Implementing a Parser and AST" href="LangImpl2.html" />
-    <link rel="prev" title="1. Kaleidoscope: Tutorial Introduction and the Lexer" href="LangImpl1.html" />
+    <link rel="next" title="1. Kaleidoscope: Tutorial Introduction and the Lexer" href="OCamlLangImpl1.html" />
+    <link rel="prev" title="9. Kaleidoscope: Adding Debug Information" href="LangImpl09.html" />
 <style type="text/css">
   table.right { float: right; margin-left: 20px; }
   table.right td { border: 1px solid #ccc; }
@@ -48,10 +48,10 @@
           <a href="../genindex.html" title="General Index"
              accesskey="I">index</a></li>
         <li class="right" >
-          <a href="LangImpl2.html" title="3. Kaleidoscope: Implementing a Parser and AST"
+          <a href="OCamlLangImpl1.html" title="1. Kaleidoscope: Tutorial Introduction and the Lexer"
              accesskey="N">next</a> |</li>
         <li class="right" >
-          <a href="LangImpl1.html" title="1. Kaleidoscope: Tutorial Introduction and the Lexer"
+          <a href="LangImpl09.html" title="9. Kaleidoscope: Adding Debug Information"
              accesskey="P">previous</a> |</li>
   <li><a href="http://llvm.org/">LLVM Home</a>&nbsp;|&nbsp;</li>
   <li><a href="../index.html">Documentation</a>&raquo;</li>
@@ -66,7 +66,7 @@
           <div class="body" role="main">
             
   <div class="section" id="kaleidoscope-conclusion-and-other-useful-llvm-tidbits">
-<h1>2. Kaleidoscope: Conclusion and other useful LLVM tidbits<a class="headerlink" href="#kaleidoscope-conclusion-and-other-useful-llvm-tidbits" title="Permalink to this headline">¶</a></h1>
+<h1>10. Kaleidoscope: Conclusion and other useful LLVM tidbits<a class="headerlink" href="#kaleidoscope-conclusion-and-other-useful-llvm-tidbits" title="Permalink to this headline">¶</a></h1>
 <div class="contents local topic" id="contents">
 <ul class="simple">
 <li><a class="reference internal" href="#tutorial-conclusion" id="id2">Tutorial Conclusion</a></li>
@@ -84,7 +84,7 @@
 </ul>
 </div>
 <div class="section" id="tutorial-conclusion">
-<h2><a class="toc-backref" href="#id2">2.1. Tutorial Conclusion</a><a class="headerlink" href="#tutorial-conclusion" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id2">10.1. Tutorial Conclusion</a><a class="headerlink" href="#tutorial-conclusion" title="Permalink to this headline">¶</a></h2>
 <p>Welcome to the final chapter of the &#8220;<a class="reference external" href="index.html">Implementing a language with
 LLVM</a>&#8221; tutorial. In the course of this tutorial, we have
 grown our little Kaleidoscope language from being a useless toy, to
@@ -125,10 +125,7 @@ arrays are very easy and are quite useful for many different
 applications. Adding them is mostly an exercise in learning how the
 LLVM <a class="reference external" href="../LangRef.html#getelementptr-instruction">getelementptr</a> instruction
 works: it is so nifty/unconventional, it <a class="reference external" href="../GetElementPtr.html">has its own
-FAQ</a>! If you add support for recursive types
-(e.g. linked lists), make sure to read the <a class="reference external" href="../ProgrammersManual.html#TypeResolve">section in the LLVM
-Programmer&#8217;s Manual</a> that
-describes how to construct them.</li>
+FAQ</a>!</li>
 <li><strong>standard runtime</strong> - Our current language allows the user to access
 arbitrary external functions, and we use it for things like &#8220;printd&#8221;
 and &#8220;putchard&#8221;. As you extend the language to add higher-level
@@ -174,11 +171,11 @@ may not be obvious, but are very useful if you want to take advantage of
 LLVM&#8217;s capabilities.</p>
 </div>
 <div class="section" id="properties-of-the-llvm-ir">
-<h2><a class="toc-backref" href="#id3">2.2. Properties of the LLVM IR</a><a class="headerlink" href="#properties-of-the-llvm-ir" title="Permalink to this headline">¶</a></h2>
-<p>We have a couple common questions about code in the LLVM IR form - lets
-just get these out of the way right now, shall we?</p>
+<h2><a class="toc-backref" href="#id3">10.2. Properties of the LLVM IR</a><a class="headerlink" href="#properties-of-the-llvm-ir" title="Permalink to this headline">¶</a></h2>
+<p>We have a couple of common questions about code in the LLVM IR form -
+let&#8217;s just get these out of the way right now, shall we?</p>
 <div class="section" id="target-independence">
-<h3><a class="toc-backref" href="#id4">2.2.1. Target Independence</a><a class="headerlink" href="#target-independence" title="Permalink to this headline">¶</a></h3>
+<h3><a class="toc-backref" href="#id4">10.2.1. Target Independence</a><a class="headerlink" href="#target-independence" title="Permalink to this headline">¶</a></h3>
 <p>Kaleidoscope is an example of a &#8220;portable language&#8221;: any program written
 in Kaleidoscope will work the same way on any target that it runs on.
 Many other languages have this property, e.g. lisp, java, haskell,
@@ -221,7 +218,7 @@ you can have portable code. This can make sense for specialized domains
 such as an in-kernel language.</p>
 </div>
 <div class="section" id="safety-guarantees">
-<h3><a class="toc-backref" href="#id5">2.2.2. Safety Guarantees</a><a class="headerlink" href="#safety-guarantees" title="Permalink to this headline">¶</a></h3>
+<h3><a class="toc-backref" href="#id5">10.2.2. Safety Guarantees</a><a class="headerlink" href="#safety-guarantees" title="Permalink to this headline">¶</a></h3>
 <p>Many of the languages above are also &#8220;safe&#8221; languages: it is impossible
 for a program written in Java to corrupt its address space and crash the
 process (assuming the JVM has no bugs). Safety is an interesting
@@ -236,7 +233,7 @@ mailing list</a> if
 you are interested in more details.</p>
 </div>
 <div class="section" id="language-specific-optimizations">
-<h3><a class="toc-backref" href="#id6">2.2.3. Language-Specific Optimizations</a><a class="headerlink" href="#language-specific-optimizations" title="Permalink to this headline">¶</a></h3>
+<h3><a class="toc-backref" href="#id6">10.2.3. Language-Specific Optimizations</a><a class="headerlink" href="#language-specific-optimizations" title="Permalink to this headline">¶</a></h3>
 <p>One thing about LLVM that turns off many people is that it does not
 solve all the world&#8217;s problems in one system (sorry &#8216;world hunger&#8217;,
 someone else will have to solve you some other day). One specific
@@ -282,13 +279,13 @@ you desire in your front-end, on the language-specific AST.</p>
 </div>
 </div>
 <div class="section" id="tips-and-tricks">
-<h2><a class="toc-backref" href="#id7">2.3. Tips and Tricks</a><a class="headerlink" href="#tips-and-tricks" title="Permalink to this headline">¶</a></h2>
+<h2><a class="toc-backref" href="#id7">10.3. Tips and Tricks</a><a class="headerlink" href="#tips-and-tricks" title="Permalink to this headline">¶</a></h2>
 <p>There is a variety of useful tips and tricks that you come to know after
 working on/with LLVM that aren&#8217;t obvious at first glance. Instead of
 letting everyone rediscover them, this section talks about some of these
 issues.</p>
 <div class="section" id="implementing-portable-offsetof-sizeof">
-<h3><a class="toc-backref" href="#id8">2.3.1. Implementing portable offsetof/sizeof</a><a class="headerlink" href="#implementing-portable-offsetof-sizeof" title="Permalink to this headline">¶</a></h3>
+<h3><a class="toc-backref" href="#id8">10.3.1. Implementing portable offsetof/sizeof</a><a class="headerlink" href="#implementing-portable-offsetof-sizeof" title="Permalink to this headline">¶</a></h3>
 <p>One interesting thing that comes up, if you are trying to keep the code
 generated by your compiler &#8220;target independent&#8221;, is that you often need
 to know the size of some LLVM type or the offset of some field in an
@@ -301,7 +298,7 @@ instruction</a>
 that allows you to compute this in a portable way.</p>
 </div>
 <div class="section" id="garbage-collected-stack-frames">
-<h3><a class="toc-backref" href="#id9">2.3.2. Garbage Collected Stack Frames</a><a class="headerlink" href="#garbage-collected-stack-frames" title="Permalink to this headline">¶</a></h3>
+<h3><a class="toc-backref" href="#id9">10.3.2. Garbage Collected Stack Frames</a><a class="headerlink" href="#garbage-collected-stack-frames" title="Permalink to this headline">¶</a></h3>
 <p>Some languages want to explicitly manage their stack frames, often so
 that they are garbage collected or to allow easy implementation of
 closures. There are often better ways to implement these features than
@@ -327,10 +324,10 @@ the use of tail calls (which LLVM also supports).</p>
           <a href="../genindex.html" title="General Index"
              >index</a></li>
         <li class="right" >
-          <a href="LangImpl2.html" title="3. Kaleidoscope: Implementing a Parser and AST"
+          <a href="OCamlLangImpl1.html" title="1. Kaleidoscope: Tutorial Introduction and the Lexer"
              >next</a> |</li>
         <li class="right" >
-          <a href="LangImpl1.html" title="1. Kaleidoscope: Tutorial Introduction and the Lexer"
+          <a href="LangImpl09.html" title="9. Kaleidoscope: Adding Debug Information"
              >previous</a> |</li>
   <li><a href="http://llvm.org/">LLVM Home</a>&nbsp;|&nbsp;</li>
   <li><a href="../index.html">Documentation</a>&raquo;</li>
@@ -340,7 +337,7 @@ the use of tail calls (which LLVM also supports).</p>
     </div>
     <div class="footer" role="contentinfo">
         &copy; Copyright 2003-2016, LLVM Project.
-      Last updated on 2016-03-12.
+      Last updated on 2016-04-19.
       Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.6.
     </div>
   </body>

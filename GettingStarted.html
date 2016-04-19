@@ -204,23 +204,13 @@ Although the build is known to work with CMake &gt;= 2.8.8, we recommend CMake
 </li>
 <li><p class="first"><code class="docutils literal"><span class="pre">cmake</span> <span class="pre">-G</span> <span class="pre">&lt;generator&gt;</span> <span class="pre">[options]</span> <span class="pre">&lt;path</span> <span class="pre">to</span> <span class="pre">llvm</span> <span class="pre">sources&gt;</span></code></p>
 <p>Some common generators are:</p>
-<ul>
-<li><p class="first"><code class="docutils literal"><span class="pre">Unix</span> <span class="pre">Makefiles</span></code> &#8212; for generating make-compatible parallel makefiles.</p>
-</li>
-<li><dl class="first docutils">
-<dt><code class="docutils literal"><span class="pre">Ninja</span></code> &#8212; for generating <cite>Ninja &lt;http://martine.github.io/ninja/&gt;</cite></dt>
-<dd><p class="first last">build files. Most llvm developers use Ninja.</p>
-</dd>
-</dl>
-</li>
-<li><dl class="first docutils">
-<dt><code class="docutils literal"><span class="pre">Visual</span> <span class="pre">Studio</span></code> &#8212; for generating Visual Studio projects and</dt>
-<dd><p class="first last">solutions.</p>
-</dd>
-</dl>
-</li>
-<li><p class="first"><code class="docutils literal"><span class="pre">Xcode</span></code> &#8212; for generating Xcode projects.</p>
-</li>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">Unix</span> <span class="pre">Makefiles</span></code> &#8212; for generating make-compatible parallel makefiles.</li>
+<li><code class="docutils literal"><span class="pre">Ninja</span></code> &#8212; for generating <a class="reference external" href="https://ninja-build.org">Ninja</a>
+build files. Most llvm developers use Ninja.</li>
+<li><code class="docutils literal"><span class="pre">Visual</span> <span class="pre">Studio</span></code> &#8212; for generating Visual Studio projects and
+solutions.</li>
+<li><code class="docutils literal"><span class="pre">Xcode</span></code> &#8212; for generating Xcode projects.</li>
 </ul>
 <p>Some Common options:</p>
 <ul class="simple">
@@ -382,13 +372,9 @@ uses the package and provides other details.</p>
 <td>&gt;=2.7</td>
 <td>Automated test suite<sup>2</sup></td>
 </tr>
-<tr class="row-odd"><td><a class="reference external" href="http://savannah.gnu.org/projects/libtool">libtool</a></td>
-<td>1.5.22</td>
-<td>Shared library manager<sup>3</sup></td>
-</tr>
-<tr class="row-even"><td><a class="reference external" href="http://zlib.net">zlib</a></td>
+<tr class="row-odd"><td><a class="reference external" href="http://zlib.net">zlib</a></td>
 <td>&gt;=1.2.3.4</td>
-<td>Compression library<sup>4</sup></td>
+<td>Compression library<sup>3</sup></td>
 </tr>
 </tbody>
 </table>
@@ -1306,7 +1292,7 @@ write something up!).  For more information about LLVM, check out:</p>
     </div>
     <div class="footer" role="contentinfo">
         &copy; Copyright 2003-2016, LLVM Project.
-      Last updated on 2016-03-10.
+      Last updated on 2016-04-19.
       Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.6.
     </div>
   </body>

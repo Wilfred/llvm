@@ -25,8 +25,8 @@
     <script type="text/javascript" src="../_static/underscore.js"></script>
     <script type="text/javascript" src="../_static/doctools.js"></script>
     <link rel="top" title="LLVM 3.9 documentation" href="../index.html" />
-    <link rel="next" title="1. Kaleidoscope: Tutorial Introduction and the Lexer" href="LangImpl1.html" />
-    <link rel="prev" title="LLVM test-suite Makefile Guide" href="../TestSuiteMakefileGuide.html" />
+    <link rel="next" title="1. Kaleidoscope: Tutorial Introduction and the Lexer" href="LangImpl01.html" />
+    <link rel="prev" title="LLVM test-suite Guide" href="../TestSuiteMakefileGuide.html" />
 <style type="text/css">
   table.right { float: right; margin-left: 20px; }
   table.right td { border: 1px solid #ccc; }
@@ -47,10 +47,10 @@
           <a href="../genindex.html" title="General Index"
              accesskey="I">index</a></li>
         <li class="right" >
-          <a href="LangImpl1.html" title="1. Kaleidoscope: Tutorial Introduction and the Lexer"
+          <a href="LangImpl01.html" title="1. Kaleidoscope: Tutorial Introduction and the Lexer"
              accesskey="N">next</a> |</li>
         <li class="right" >
-          <a href="../TestSuiteMakefileGuide.html" title="LLVM test-suite Makefile Guide"
+          <a href="../TestSuiteMakefileGuide.html" title="LLVM test-suite Guide"
              accesskey="P">previous</a> |</li>
   <li><a href="http://llvm.org/">LLVM Home</a>&nbsp;|&nbsp;</li>
   <li><a href="../index.html">Documentation</a>&raquo;</li>
@@ -69,34 +69,34 @@
 <h2>Kaleidoscope: Implementing a Language with LLVM<a class="headerlink" href="#kaleidoscope-implementing-a-language-with-llvm" title="Permalink to this headline">¶</a></h2>
 <div class="toctree-wrapper compound">
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="LangImpl1.html">1. Kaleidoscope: Tutorial Introduction and the Lexer</a><ul class="simple">
+<li class="toctree-l1"><a class="reference internal" href="LangImpl01.html">1. Kaleidoscope: Tutorial Introduction and the Lexer</a><ul class="simple">
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="LangImpl10.html">2. Kaleidoscope: Conclusion and other useful LLVM tidbits</a><ul class="simple">
+<li class="toctree-l1"><a class="reference internal" href="LangImpl02.html">2. Kaleidoscope: Implementing a Parser and AST</a><ul class="simple">
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="LangImpl2.html">3. Kaleidoscope: Implementing a Parser and AST</a><ul class="simple">
+<li class="toctree-l1"><a class="reference internal" href="LangImpl03.html">3. Kaleidoscope: Code generation to LLVM IR</a><ul class="simple">
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="LangImpl3.html">4. Kaleidoscope: Code generation to LLVM IR</a><ul class="simple">
+<li class="toctree-l1"><a class="reference internal" href="LangImpl04.html">4. Kaleidoscope: Adding JIT and Optimizer Support</a><ul class="simple">
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="LangImpl4.html">5. Kaleidoscope: Adding JIT and Optimizer Support</a><ul class="simple">
+<li class="toctree-l1"><a class="reference internal" href="LangImpl05.html">5. Kaleidoscope: Extending the Language: Control Flow</a><ul class="simple">
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="LangImpl5.html">6. Kaleidoscope: Compiling to Object Code</a><ul class="simple">
+<li class="toctree-l1"><a class="reference internal" href="LangImpl06.html">6. Kaleidoscope: Extending the Language: User-defined Operators</a><ul class="simple">
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="LangImpl6.html">7. Kaleidoscope: Extending the Language: Control Flow</a><ul class="simple">
+<li class="toctree-l1"><a class="reference internal" href="LangImpl07.html">7. Kaleidoscope: Extending the Language: Mutable Variables</a><ul class="simple">
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="LangImpl7.html">8. Kaleidoscope: Extending the Language: User-defined Operators</a><ul class="simple">
+<li class="toctree-l1"><a class="reference internal" href="LangImpl08.html">8. Kaleidoscope: Compiling to Object Code</a><ul class="simple">
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="LangImpl8.html">9. Kaleidoscope: Extending the Language: Mutable Variables</a><ul class="simple">
+<li class="toctree-l1"><a class="reference internal" href="LangImpl09.html">9. Kaleidoscope: Adding Debug Information</a><ul class="simple">
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="LangImpl9.html">10. Kaleidoscope: Adding Debug Information</a><ul class="simple">
+<li class="toctree-l1"><a class="reference internal" href="LangImpl10.html">10. Kaleidoscope: Conclusion and other useful LLVM tidbits</a><ul class="simple">
 </ul>
 </li>
 </ul>
@@ -165,10 +165,10 @@ architecture.</dd>
           <a href="../genindex.html" title="General Index"
              >index</a></li>
         <li class="right" >
-          <a href="LangImpl1.html" title="1. Kaleidoscope: Tutorial Introduction and the Lexer"
+          <a href="LangImpl01.html" title="1. Kaleidoscope: Tutorial Introduction and the Lexer"
              >next</a> |</li>
         <li class="right" >
-          <a href="../TestSuiteMakefileGuide.html" title="LLVM test-suite Makefile Guide"
+          <a href="../TestSuiteMakefileGuide.html" title="LLVM test-suite Guide"
              >previous</a> |</li>
   <li><a href="http://llvm.org/">LLVM Home</a>&nbsp;|&nbsp;</li>
   <li><a href="../index.html">Documentation</a>&raquo;</li>
@@ -177,7 +177,7 @@ architecture.</dd>
     </div>
     <div class="footer" role="contentinfo">
         &copy; Copyright 2003-2016, LLVM Project.
-      Last updated on 2016-03-12.
+      Last updated on 2016-04-19.
       Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.3.6.
     </div>
   </body>
