@@ -62,6 +62,10 @@ class InstrProfErrorCategoryType : public std::error_category {
       return "Counter overflow";
     case instrprof_error::value_site_count_mismatch:
       return "Function value site count change detected (counter mismatch)";
+    case instrprof_error::compress_failed:
+      return "Failed to compress data (zlib)";
+    case instrprof_error::uncompress_failed:
+      return "Failed to uncompress data (zlib)";
     }
     llvm_unreachable("A value of instrprof_error has no message.");
   }
@@ -185,8 +189,9 @@ void InstrProfSymtab::create(Module &M, bool InLTO) {
   finalizeSymtab();
 }
 
-int collectPGOFuncNameStrings(const std::vector<std::string> &NameStrs,
-                              bool doCompression, std::string &Result) {
+std::error_code
+collectPGOFuncNameStrings(const std::vector<std::string> &NameStrs,
+                          bool doCompression, std::string &Result) {
   assert(NameStrs.size() && "No name data to emit");
 
   uint8_t Header[16], *P = Header;
@@ -208,7 +213,7 @@ int collectPGOFuncNameStrings(const std::vector<std::string> &NameStrs,
     unsigned HeaderLen = P - &Header[0];
     Result.append(HeaderStr, HeaderLen);
     Result += InputStr;
-    return 0;
+    return make_error_code(instrprof_error::success);
   };
 
   if (!doCompression)
@@ -220,7 +225,7 @@ int collectPGOFuncNameStrings(const std::vector<std::string> &NameStrs,
                      zlib::BestSizeCompression);
 
   if (Success != zlib::StatusOK)
-    return 1;
+    return make_error_code(instrprof_error::compress_failed);
 
   return WriteStringToResult(
       CompressedNameStrings.size(),
@@ -234,8 +239,9 @@ StringRef getPGOFuncNameVarInitializer(GlobalVariable *NameVar) {
   return NameStr;
 }
 
-int collectPGOFuncNameStrings(const std::vector<GlobalVariable *> &NameVars,
-                              std::string &Result, bool doCompression) {
+std::error_code
+collectPGOFuncNameStrings(const std::vector<GlobalVariable *> &NameVars,
+                          std::string &Result, bool doCompression) {
   std::vector<std::string> NameStrs;
   for (auto *NameVar : NameVars) {
     NameStrs.push_back(getPGOFuncNameVarInitializer(NameVar));
@@ -244,7 +250,8 @@ int collectPGOFuncNameStrings(const std::vector<GlobalVariable *> &NameVars,
       NameStrs, zlib::isAvailable() && doCompression, Result);
 }
 
-int readPGOFuncNameStrings(StringRef NameStrings, InstrProfSymtab &Symtab) {
+std::error_code readPGOFuncNameStrings(StringRef NameStrings,
+                                       InstrProfSymtab &Symtab) {
   const uint8_t *P = reinterpret_cast<const uint8_t *>(NameStrings.data());
   const uint8_t *EndP = reinterpret_cast<const uint8_t *>(NameStrings.data() +
                                                           NameStrings.size());
@@ -262,7 +269,7 @@ int readPGOFuncNameStrings(StringRef NameStrings, InstrProfSymtab &Symtab) {
                                       CompressedSize);
       if (zlib::uncompress(CompressedNameStrings, UncompressedNameStrings,
                            UncompressedSize) != zlib::StatusOK)
-        return 1;
+        return make_error_code(instrprof_error::uncompress_failed);
       P += CompressedSize;
       NameStrings = StringRef(UncompressedNameStrings.data(),
                               UncompressedNameStrings.size());
@@ -281,7 +288,7 @@ int readPGOFuncNameStrings(StringRef NameStrings, InstrProfSymtab &Symtab) {
       P++;
   }
   Symtab.finalizeSymtab();
-  return 0;
+  return make_error_code(instrprof_error::success);
 }
 
 instrprof_error InstrProfValueSiteRecord::merge(InstrProfValueSiteRecord &Input,
@@ -398,8 +405,14 @@ uint64_t InstrProfRecord::remapValue(uint64_t Value, uint32_t ValueKind,
         std::lower_bound(ValueMap->begin(), ValueMap->end(), Value,
                          [](const std::pair<uint64_t, uint64_t> &LHS,
                             uint64_t RHS) { return LHS.first < RHS; });
-    if (Result != ValueMap->end())
+   // Raw function pointer collected by value profiler may be from 
+   // external functions that are not instrumented. They won't have
+   // mapping data to be used by the deserializer. Force the value to
+   // be 0 in this case.
+    if (Result != ValueMap->end() && Result->first == Value)
       Value = (uint64_t)Result->second;
+    else
+      Value = 0;
     break;
   }
   }
@@ -451,7 +464,6 @@ uint32_t getNumValueDataForSiteInstrProf(const void *R, uint32_t VK,
 void getValueForSiteInstrProf(const void *R, InstrProfValueData *Dst,
                               uint32_t K, uint32_t S) {
   reinterpret_cast<const InstrProfRecord *>(R)->getValueForSite(Dst, K, S);
-  return;
 }
 
 ValueProfData *allocValueProfDataInstrProf(size_t TotalSizeInBytes) {
@@ -630,6 +642,8 @@ void annotateValueSite(Module &M, Instruction &Inst,
                        InstrProfValueKind ValueKind, uint32_t SiteIdx,
                        uint32_t MaxMDCount) {
   uint32_t NV = InstrProfR.getNumValueDataForSite(ValueKind, SiteIdx);
+  if (!NV)
+    return;
 
   uint64_t Sum = 0;
   std::unique_ptr<InstrProfValueData[]> VD =
@@ -724,13 +738,15 @@ MDNode *getPGOFuncNameMetadata(const Function &F) {
   return F.getMetadata(getPGOFuncNameMetadataName());
 }
 
-void createPGOFuncNameMetadata(Function &F) {
-  const std::string &FuncName = getPGOFuncName(F);
-  if (FuncName == F.getName())
+void createPGOFuncNameMetadata(Function &F, const std::string &PGOFuncName) {
+  // Only for internal linkage functions.
+  if (PGOFuncName == F.getName())
+      return;
+  // Don't create duplicated meta-data.
+  if (getPGOFuncNameMetadata(F))
     return;
-
   LLVMContext &C = F.getContext();
-  MDNode *N = MDNode::get(C, MDString::get(C, FuncName.c_str()));
+  MDNode *N = MDNode::get(C, MDString::get(C, PGOFuncName.c_str()));
   F.setMetadata(getPGOFuncNameMetadataName(), N);
 }
 

@@ -375,6 +375,12 @@ int X86FrameLowering::mergeSPUpdates(MachineBasicBlock &MBB,
   unsigned Opc = PI->getOpcode();
   int Offset = 0;
 
+  if (!doMergeWithPrevious && NI != MBB.end() &&
+      NI->getOpcode() == TargetOpcode::CFI_INSTRUCTION) {
+    // Don't merge with the next instruction if it has CFI.
+    return Offset;
+  }
+
   if ((Opc == X86::ADD64ri32 || Opc == X86::ADD64ri8 ||
        Opc == X86::ADD32ri || Opc == X86::ADD32ri8) &&
       PI->getOperand(0).getReg() == StackPtr){
@@ -1865,16 +1871,25 @@ bool X86FrameLowering::spillCalleeSavedRegisters(
     return true;
 
   // Push GPRs. It increases frame size.
+  const MachineFunction &MF = *MBB.getParent();
   unsigned Opc = STI.is64Bit() ? X86::PUSH64r : X86::PUSH32r;
   for (unsigned i = CSI.size(); i != 0; --i) {
     unsigned Reg = CSI[i - 1].getReg();
 
     if (!X86::GR64RegClass.contains(Reg) && !X86::GR32RegClass.contains(Reg))
       continue;
-    // Add the callee-saved register as live-in. It's killed at the spill.
-    MBB.addLiveIn(Reg);
 
-    BuildMI(MBB, MI, DL, TII.get(Opc)).addReg(Reg, RegState::Kill)
+    bool isLiveIn = MF.getRegInfo().isLiveIn(Reg);
+    if (!isLiveIn)
+      MBB.addLiveIn(Reg);
+
+    // Do not set a kill flag on values that are also marked as live-in. This
+    // happens with the @llvm-returnaddress intrinsic and with arguments
+    // passed in callee saved registers.
+    // Omitting the kill flags is conservatively correct even if the live-in
+    // is not used after all.
+    bool isKill = !isLiveIn;
+    BuildMI(MBB, MI, DL, TII.get(Opc)).addReg(Reg, getKillRegState(isKill))
       .setMIFlag(MachineInstr::FrameSetup);
   }
 
@@ -2264,7 +2279,7 @@ void X86FrameLowering::adjustForSegmentedStacks(
   checkMBB->addSuccessor(allocMBB);
   checkMBB->addSuccessor(&PrologueMBB);
 
-#ifdef XDEBUG
+#ifdef EXPENSIVE_CHECKS
   MF.verify();
 #endif
 }
@@ -2408,7 +2423,7 @@ void X86FrameLowering::adjustForHiPEPrologue(
     incStackMBB->addSuccessor(&PrologueMBB, {99, 100});
     incStackMBB->addSuccessor(incStackMBB, {1, 100});
   }
-#ifdef XDEBUG
+#ifdef EXPENSIVE_CHECKS
   MF.verify();
 #endif
 }
@@ -2541,20 +2556,21 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
 
     // Add Amount to SP to destroy a frame, or subtract to setup.
     int64_t StackAdjustment = isDestroy ? Amount : -Amount;
+    int64_t CfaAdjustment = -StackAdjustment;
 
     if (StackAdjustment) {
-      // Merge with any previous or following adjustment instruction.
+      // Merge with any previous or following adjustment instruction. Note: the
+      // instructions merged with here do not have CFI, so their stack
+      // adjustments do not feed into CfaAdjustment.
       StackAdjustment += mergeSPUpdates(MBB, I, true);
       StackAdjustment += mergeSPUpdates(MBB, I, false);
 
-      if (!StackAdjustment) {
-        // This and the merged instruction canceled out each other.
-        return I;
+      if (StackAdjustment) {
+        if (!(Fn->optForMinSize() &&
+              adjustStackWithPops(MBB, I, DL, StackAdjustment)))
+          BuildStackAdjustment(MBB, I, DL, StackAdjustment,
+                               /*InEpilogue=*/false);
       }
-
-      if (!(Fn->optForMinSize() &&
-            adjustStackWithPops(MBB, I, DL, StackAdjustment)))
-        BuildStackAdjustment(MBB, I, DL, StackAdjustment, /*InEpilogue=*/false);
     }
 
     if (DwarfCFI && !hasFP(MF)) {
@@ -2567,9 +2583,9 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
 
       // TODO: When not using precise CFA, we also need to adjust for the
       // InternalAmt here.
-      if (StackAdjustment) {
+      if (CfaAdjustment) {
         BuildCFI(MBB, I, DL, MCCFIInstruction::createAdjustCfaOffset(
-                                 nullptr, -StackAdjustment));
+                                 nullptr, CfaAdjustment));
       }
     }
 
@@ -2591,6 +2607,12 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
   }
 
   return I;
+}
+
+bool X86FrameLowering::canUseAsPrologue(const MachineBasicBlock &MBB) const {
+  assert(MBB.getParent() && "Block is not attached to a function!");
+  const MachineFunction &MF = *MBB.getParent();
+  return !TRI->needsStackRealignment(MF) || !MBB.isLiveIn(X86::EFLAGS);
 }
 
 bool X86FrameLowering::canUseAsEpilogue(const MachineBasicBlock &MBB) const {

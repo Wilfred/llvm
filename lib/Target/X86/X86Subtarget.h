@@ -467,6 +467,8 @@ public:
   bool isTargetMachO() const { return TargetTriple.isOSBinFormatMachO(); }
 
   bool isTargetLinux() const { return TargetTriple.isOSLinux(); }
+  bool isTargetKFreeBSD() const { return TargetTriple.isOSKFreeBSD(); }
+  bool isTargetGlibc() const { return TargetTriple.isOSGlibc(); }
   bool isTargetAndroid() const { return TargetTriple.isAndroid(); }
   bool isTargetNaCl() const { return TargetTriple.isOSNaCl(); }
   bool isTargetNaCl32() const { return isTargetNaCl() && !is64Bit(); }
@@ -548,11 +550,24 @@ public:
     }
   }
 
+  /// Determine if this global is defined in a Position Independent
+  /// Executable (PIE) where its definition cannot be interposed.
+  bool isGlobalDefinedInPIE(const GlobalValue *GV,
+                            const TargetMachine &TM) const {
+    return GV->getParent()->getPIELevel() != PIELevel::Default &&
+           !GV->isDeclarationForLinker();
+  }
+
   /// ClassifyGlobalReference - Classify a global variable reference for the
   /// current subtarget according to how we should reference it in a non-pcrel
   /// context.
   unsigned char ClassifyGlobalReference(const GlobalValue *GV,
                                         const TargetMachine &TM)const;
+
+  /// classifyGlobalFunctionReference - Classify a global function reference
+  /// for the current subtarget.
+  unsigned char classifyGlobalFunctionReference(const GlobalValue *GV,
+                                                const TargetMachine &TM) const;
 
   /// Classify a blockaddress reference for the current subtarget according to
   /// how we should reference it in a non-pcrel context.

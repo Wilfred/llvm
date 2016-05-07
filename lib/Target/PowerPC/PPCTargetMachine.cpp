@@ -15,6 +15,7 @@
 #include "PPC.h"
 #include "PPCTargetObjectFile.h"
 #include "PPCTargetTransformInfo.h"
+#include "llvm/CodeGen/LiveVariables.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -318,7 +319,7 @@ void PPCPassConfig::addIRPasses() {
   if (UsePrefetching)
     addPass(createLoopDataPrefetchPass());
 
-  if (TM->getOptLevel() == CodeGenOpt::Aggressive && EnableGEPOpt) {
+  if (TM->getOptLevel() >= CodeGenOpt::Default && EnableGEPOpt) {
     // Call SeparateConstOffsetFromGEP pass to extract constants within indices
     // and lower a GEP with multiple indices to either arithmetic operations or
     // multiple GEPs with single index.
@@ -382,11 +383,19 @@ void PPCPassConfig::addMachineSSAOptimization() {
 }
 
 void PPCPassConfig::addPreRegAlloc() {
-  initializePPCVSXFMAMutatePass(*PassRegistry::getPassRegistry());
-  insertPass(VSXFMAMutateEarly ? &RegisterCoalescerID : &MachineSchedulerID,
-             &PPCVSXFMAMutateID);
-  if (getPPCTargetMachine().getRelocationModel() == Reloc::PIC_)
+  if (getOptLevel() != CodeGenOpt::None) {
+    initializePPCVSXFMAMutatePass(*PassRegistry::getPassRegistry());
+    insertPass(VSXFMAMutateEarly ? &RegisterCoalescerID : &MachineSchedulerID,
+               &PPCVSXFMAMutateID);
+  }
+  if (getPPCTargetMachine().getRelocationModel() == Reloc::PIC_) {
+    // FIXME: LiveVariables should not be necessary here!
+    // PPCTLSDYnamicCallPass uses LiveIntervals which previously dependet on
+    // LiveVariables. This (unnecessary) dependency has been removed now,
+    // however a stage-2 clang build fails without LiveVariables computed here.
+    addPass(&LiveVariablesID, false);
     addPass(createPPCTLSDynamicCallPass());
+  }
   if (EnableExtraTOCRegDeps)
     addPass(createPPCTOCRegDepsPass());
 }

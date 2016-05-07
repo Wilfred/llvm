@@ -1,5 +1,4 @@
-//===- unittest/ProfileData/SampleProfTest.cpp -------------------*- C++
-//-*-===//
+//===- unittest/ProfileData/SampleProfTest.cpp ------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,12 +7,27 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/Module.h"
+#include "llvm/ProfileData/ProfileCommon.h"
+#include "llvm/ProfileData/SampleProf.h"
 #include "llvm/ProfileData/SampleProfReader.h"
 #include "llvm/ProfileData/SampleProfWriter.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/ErrorOr.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/raw_ostream.h"
 #include "gtest/gtest.h"
-
-#include <cstdarg>
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <string>
+#include <system_error>
+#include <vector>
 
 using namespace llvm;
 using namespace sampleprof;
@@ -29,6 +43,7 @@ namespace {
 
 struct SampleProfTest : ::testing::Test {
   std::string Data;
+  LLVMContext Context;
   std::unique_ptr<raw_ostream> OS;
   std::unique_ptr<SampleProfileWriter> Writer;
   std::unique_ptr<SampleProfileReader> Reader;
@@ -43,7 +58,7 @@ struct SampleProfTest : ::testing::Test {
   }
 
   void readProfile(std::unique_ptr<MemoryBuffer> &Profile) {
-    auto ReaderOrErr = SampleProfileReader::create(Profile, getGlobalContext());
+    auto ReaderOrErr = SampleProfileReader::create(Profile, Context);
     ASSERT_TRUE(NoError(ReaderOrErr.getError()));
     Reader = std::move(ReaderOrErr.get());
   }
@@ -127,7 +142,7 @@ struct SampleProfTest : ::testing::Test {
     VerifySummary(Summary);
 
     // Test that conversion of summary to and from Metadata works.
-    Metadata *MD = Summary.getMD(getGlobalContext());
+    Metadata *MD = Summary.getMD(Context);
     ASSERT_TRUE(MD);
     ProfileSummary *PS = ProfileSummary::getFromMD(MD);
     ASSERT_TRUE(PS);
@@ -137,7 +152,7 @@ struct SampleProfTest : ::testing::Test {
     delete SPS;
 
     // Test that summary can be attached to and read back from module.
-    Module M("my_module", getGlobalContext());
+    Module M("my_module", Context);
     M.setProfileSummary(MD);
     MD = M.getProfileSummary();
     ASSERT_TRUE(MD);

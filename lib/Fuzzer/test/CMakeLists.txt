@@ -13,6 +13,7 @@ set(DFSanTests
   )
 
 set(Tests
+  AccumulateAllocationsTest
   BufferOverflowOnInput
   CallerCalleeTest
   CounterTest
@@ -25,6 +26,7 @@ set(Tests
   LeakTimeoutTest
   NullDerefTest
   NthRunCrashTest
+  OutOfMemoryTest
   RepeatedMemcmp
   SimpleCmpTest
   SimpleDictionaryTest

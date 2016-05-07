@@ -94,9 +94,9 @@ public:
                              int64_t &Offset,
                              const TargetRegisterInfo *TRI) const final;
 
-  bool shouldClusterLoads(MachineInstr *FirstLdSt,
-                          MachineInstr *SecondLdSt,
-                          unsigned NumLoads) const final;
+  bool shouldClusterMemOps(MachineInstr *FirstLdSt,
+                           MachineInstr *SecondLdSt,
+                           unsigned NumLoads) const final;
 
   void copyPhysReg(MachineBasicBlock &MBB,
                    MachineBasicBlock::iterator MI, DebugLoc DL,
@@ -167,6 +167,14 @@ public:
 
   bool isVALU(uint16_t Opcode) const {
     return get(Opcode).TSFlags & SIInstrFlags::VALU;
+  }
+
+  static bool isVMEM(const MachineInstr &MI) {
+    return isMUBUF(MI) || isMTBUF(MI) || isMIMG(MI);
+  }
+
+  bool isVMEM(uint16_t Opcode) const {
+    return isMUBUF(Opcode) || isMTBUF(Opcode) || isMIMG(Opcode);
   }
 
   static bool isSOP1(const MachineInstr &MI) {
@@ -437,7 +445,15 @@ public:
   void LoadM0(MachineInstr *MoveRel, MachineBasicBlock::iterator I,
               unsigned SavReg, unsigned IndexReg) const;
 
-  void insertWaitStates(MachineBasicBlock::iterator MI, int Count) const;
+  void insertWaitStates(MachineBasicBlock &MBB,MachineBasicBlock::iterator MI,
+                        int Count) const;
+
+  void insertNoop(MachineBasicBlock &MBB,
+                  MachineBasicBlock::iterator MI) const override;
+
+  /// \brief Return the number of wait states that result from executing this
+  /// instruction.
+  unsigned getNumWaitStates(const MachineInstr &MI) const;
 
   /// \brief Returns the operand named \p Op.  If \p MI does not have an
   /// operand named \c Op, this function returns nullptr.
@@ -470,6 +486,13 @@ public:
 
   ArrayRef<std::pair<int, const char *>>
   getSerializableTargetIndices() const override;
+
+  ScheduleHazardRecognizer *
+  CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
+                                 const ScheduleDAG *DAG) const override;
+
+  ScheduleHazardRecognizer *
+  CreateTargetPostRAHazardRecognizer(const MachineFunction &MF) const override;
 
 };
 

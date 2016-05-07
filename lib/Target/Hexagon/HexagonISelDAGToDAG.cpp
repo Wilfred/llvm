@@ -15,13 +15,11 @@
 #include "HexagonISelLowering.h"
 #include "HexagonMachineFunctionInfo.h"
 #include "HexagonTargetMachine.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 using namespace llvm;
 
@@ -72,7 +70,7 @@ public:
   virtual void PreprocessISelDAG() override;
   virtual void EmitFunctionEntryCode() override;
 
-  SDNode *Select(SDNode *N) override;
+  SDNode *SelectImpl(SDNode *N) override;
 
   // Complex Pattern Selectors.
   inline bool SelectAddrGA(SDValue &N, SDValue &R);
@@ -1286,7 +1284,7 @@ SDNode *HexagonDAGToDAGISel::SelectFrameIndex(SDNode *N) {
 }
 
 
-SDNode *HexagonDAGToDAGISel::Select(SDNode *N) {
+SDNode *HexagonDAGToDAGISel::SelectImpl(SDNode *N) {
   if (N->isMachineOpcode()) {
     N->setNodeId(-1);
     return nullptr;   // Already selected.

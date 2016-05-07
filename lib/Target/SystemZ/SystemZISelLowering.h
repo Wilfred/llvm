@@ -426,6 +426,13 @@ public:
     return SystemZ::R7D;
   }
 
+  /// Override to support customized stack guard loading.
+  bool useLoadStackGuardNode() const override {
+    return true;
+  }
+  void insertSSPDeclarations(Module &M) const override {
+  }
+
   MachineBasicBlock *EmitInstrWithCustomInserter(MachineInstr *MI,
                                                  MachineBasicBlock *BB) const
     override;
@@ -452,6 +459,10 @@ public:
                                       SelectionDAG &DAG) const override;
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
+  bool supportSwiftError() const override {
+    return true;
+  }
+
 private:
   const SystemZSubtarget &Subtarget;
 
@@ -464,6 +475,7 @@ private:
   SDValue lowerTLSGetOffset(GlobalAddressSDNode *Node,
                             SelectionDAG &DAG, unsigned Opcode,
                             SDValue GOTOffset) const;
+  SDValue lowerThreadPointer(const SDLoc &DL, SelectionDAG &DAG) const;
   SDValue lowerGlobalTLSAddress(GlobalAddressSDNode *Node,
                                 SelectionDAG &DAG) const;
   SDValue lowerBlockAddress(BlockAddressSDNode *Node,
@@ -475,6 +487,7 @@ private:
   SDValue lowerVASTART(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerVACOPY(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerGET_DYNAMIC_AREA_OFFSET(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSMUL_LOHI(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerUMUL_LOHI(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSDIVREM(SDValue Op, SelectionDAG &DAG) const;

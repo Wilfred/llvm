@@ -17,7 +17,6 @@
 #define LLVM_LTO_THINLTOCODEGENERATOR_H
 
 #include "llvm-c/lto.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/CodeGen.h"
@@ -27,6 +26,7 @@
 #include <string>
 
 namespace llvm {
+class StringRef;
 class ModuleSummaryIndex;
 class LLVMContext;
 class TargetMachine;
@@ -108,10 +108,10 @@ public:
    */
 
   struct CachingOptions {
-    std::string Path;
-    int PruningInterval = -1;               // seconds, -1 to disable pruning
-    unsigned int Expiration;                // seconds.
-    unsigned MaxPercentageOfAvailableSpace; // percentage.
+    std::string Path;                    // Path to the cache, empty to disable.
+    int PruningInterval = 1200;          // seconds, -1 to disable pruning.
+    unsigned int Expiration = 7 * 24 * 3600;     // seconds (1w default).
+    unsigned MaxPercentageOfAvailableSpace = 75; // percentage.
   };
 
   /// Provide a path to a directory where to store the cached files for
@@ -199,6 +199,11 @@ public:
    * ModuleIdentifier.
    */
   void crossModuleImport(Module &Module, ModuleSummaryIndex &Index);
+
+  /**
+   * Perform internalization.
+   */
+  void internalize(Module &Module, ModuleSummaryIndex &Index);
 
   /**
    * Perform post-importing ThinLTO optimizations.

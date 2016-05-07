@@ -1143,7 +1143,8 @@ static bool HoistThenElseCodeToIf(BranchInst *BI,
         LLVMContext::MD_fpmath,  LLVMContext::MD_invariant_load,
         LLVMContext::MD_nonnull, LLVMContext::MD_invariant_group,
         LLVMContext::MD_align,   LLVMContext::MD_dereferenceable,
-        LLVMContext::MD_dereferenceable_or_null};
+        LLVMContext::MD_dereferenceable_or_null,
+        LLVMContext::MD_mem_parallel_loop_access};
     combineMetadata(I1, I2, KnownIDs);
     I2->eraseFromParent();
     Changed = true;
@@ -1219,7 +1220,7 @@ HoistTerminator:
       if (!SI)
         SI = cast<SelectInst>
           (Builder.CreateSelect(BI->getCondition(), BB1V, BB2V,
-                                BB1V->getName() + "." + BB2V->getName()));
+                                BB1V->getName() + "." + BB2V->getName(), BI));
 
       // Make the PHI node use the select for all incoming values for BB1/BB2
       for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i)
@@ -1447,10 +1448,14 @@ static Value *isSafeToSpeculateStore(Instruction *I, BasicBlock *BrBB,
   Value *StorePtr = StoreToHoist->getPointerOperand();
 
   // Look for a store to the same pointer in BrBB.
-  unsigned MaxNumInstToLookAt = 10;
+  unsigned MaxNumInstToLookAt = 9;
   for (BasicBlock::reverse_iterator RI = BrBB->rbegin(),
-       RE = BrBB->rend(); RI != RE && (--MaxNumInstToLookAt); ++RI) {
+       RE = BrBB->rend(); RI != RE && MaxNumInstToLookAt; ++RI) {
     Instruction *CurI = &*RI;
+    // Skip debug info.
+    if (isa<DbgInfoIntrinsic>(CurI))
+      continue;
+    --MaxNumInstToLookAt;
 
     // Could be calling an instruction that effects memory like free().
     if (CurI->mayHaveSideEffects() && !isa<StoreInst>(CurI))
@@ -1678,8 +1683,8 @@ static bool SpeculativelyExecuteBB(BranchInst *BI, BasicBlock *ThenBB,
     Value *TrueV = ThenV, *FalseV = OrigV;
     if (Invert)
       std::swap(TrueV, FalseV);
-    Value *V = Builder.CreateSelect(BrCond, TrueV, FalseV,
-                                    TrueV->getName() + "." + FalseV->getName());
+    Value *V = Builder.CreateSelect(
+        BrCond, TrueV, FalseV, TrueV->getName() + "." + FalseV->getName(), BI);
     PN->setIncomingValue(OrigI, V);
     PN->setIncomingValue(ThenI, V);
   }
@@ -2023,8 +2028,8 @@ static bool SimplifyCondBranchToTwoReturns(BranchInst *BI,
     } else if (isa<UndefValue>(TrueValue)) {
       TrueValue = FalseValue;
     } else {
-      TrueValue = Builder.CreateSelect(BrCond, TrueValue,
-                                       FalseValue, "retval");
+      TrueValue =
+          Builder.CreateSelect(BrCond, TrueValue, FalseValue, "retval", BI);
     }
   }
 
@@ -2039,25 +2044,6 @@ static bool SimplifyCondBranchToTwoReturns(BranchInst *BI,
 
   EraseTerminatorInstAndDCECond(BI);
 
-  return true;
-}
-
-/// Given a conditional BranchInstruction, retrieve the probabilities of the
-/// branch taking each edge. Fills in the two APInt parameters and returns true,
-/// or returns false if no or invalid metadata was found.
-static bool ExtractBranchMetadata(BranchInst *BI,
-                                  uint64_t &ProbTrue, uint64_t &ProbFalse) {
-  assert(BI->isConditional() &&
-         "Looking for probabilities on unconditional branch?");
-  MDNode *ProfileData = BI->getMetadata(LLVMContext::MD_prof);
-  if (!ProfileData || ProfileData->getNumOperands() != 3) return false;
-  ConstantInt *CITrue =
-      mdconst::dyn_extract<ConstantInt>(ProfileData->getOperand(1));
-  ConstantInt *CIFalse =
-      mdconst::dyn_extract<ConstantInt>(ProfileData->getOperand(2));
-  if (!CITrue || !CIFalse) return false;
-  ProbTrue = CITrue->getValue().getZExtValue();
-  ProbFalse = CIFalse->getValue().getZExtValue();
   return true;
 }
 
@@ -2236,7 +2222,7 @@ bool llvm::FoldBranchToCommonDest(BranchInst *BI, unsigned BonusInstThreshold) {
         continue;
       Instruction *NewBonusInst = BonusInst->clone();
       RemapInstruction(NewBonusInst, VMap,
-                       RF_NoModuleLevelChanges | RF_IgnoreMissingEntries);
+                       RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
       VMap[&*BonusInst] = NewBonusInst;
 
       // If we moved a load, we cannot any longer claim any knowledge about
@@ -2255,7 +2241,7 @@ bool llvm::FoldBranchToCommonDest(BranchInst *BI, unsigned BonusInstThreshold) {
     // two conditions together.
     Instruction *New = Cond->clone();
     RemapInstruction(New, VMap,
-                     RF_NoModuleLevelChanges | RF_IgnoreMissingEntries);
+                     RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
     PredBlock->getInstList().insert(PBI->getIterator(), New);
     New->takeName(Cond);
     Cond->setName(New->getName() + ".old");
@@ -2267,10 +2253,10 @@ bool llvm::FoldBranchToCommonDest(BranchInst *BI, unsigned BonusInstThreshold) {
       PBI->setCondition(NewCond);
 
       uint64_t PredTrueWeight, PredFalseWeight, SuccTrueWeight, SuccFalseWeight;
-      bool PredHasWeights = ExtractBranchMetadata(PBI, PredTrueWeight,
-                                                  PredFalseWeight);
-      bool SuccHasWeights = ExtractBranchMetadata(BI, SuccTrueWeight,
-                                                  SuccFalseWeight);
+      bool PredHasWeights =
+          PBI->extractProfMetadata(PredTrueWeight, PredFalseWeight);
+      bool SuccHasWeights =
+          BI->extractProfMetadata(SuccTrueWeight, SuccFalseWeight);
       SmallVector<uint64_t, 8> NewWeights;
 
       if (PBI->getSuccessor(0) == BB) {
@@ -2720,19 +2706,6 @@ static bool SimplifyCondBranchToCondBranch(BranchInst *PBI, BranchInst *BI,
     if (CE->canTrap())
       return false;
 
-  // If BI is reached from the true path of PBI and PBI's condition implies
-  // BI's condition, we know the direction of the BI branch.
-  if (PBI->getSuccessor(0) == BI->getParent() &&
-      isImpliedCondition(PBI->getCondition(), BI->getCondition(), DL) &&
-      PBI->getSuccessor(0) != PBI->getSuccessor(1) &&
-      BB->getSinglePredecessor()) {
-    // Turn this into a branch on constant.
-    auto *OldCond = BI->getCondition();
-    BI->setCondition(ConstantInt::getTrue(BB->getContext()));
-    RecursivelyDeleteTriviallyDeadInstructions(OldCond);
-    return true;  // Nuke the branch on constant.
-  }
-
   // If both branches are conditional and both contain stores to the same
   // address, remove the stores from the conditionals and create a conditional
   // merged store at the end.
@@ -2848,10 +2821,10 @@ static bool SimplifyCondBranchToCondBranch(BranchInst *PBI, BranchInst *BI,
 
   // Update branch weight for PBI.
   uint64_t PredTrueWeight, PredFalseWeight, SuccTrueWeight, SuccFalseWeight;
-  bool PredHasWeights = ExtractBranchMetadata(PBI, PredTrueWeight,
-                                              PredFalseWeight);
-  bool SuccHasWeights = ExtractBranchMetadata(BI, SuccTrueWeight,
-                                              SuccFalseWeight);
+  bool PredHasWeights =
+      PBI->extractProfMetadata(PredTrueWeight, PredFalseWeight);
+  bool SuccHasWeights =
+      BI->extractProfMetadata(SuccTrueWeight, SuccFalseWeight);
   if (PredHasWeights && SuccHasWeights) {
     uint64_t PredCommon = PBIOp ? PredFalseWeight : PredTrueWeight;
     uint64_t PredOther = PBIOp ?PredTrueWeight : PredFalseWeight;
@@ -2887,9 +2860,29 @@ static bool SimplifyCondBranchToCondBranch(BranchInst *PBI, BranchInst *BI,
     Value *PBIV = PN->getIncomingValue(PBBIdx);
     if (BIV != PBIV) {
       // Insert a select in PBI to pick the right value.
-      Value *NV = cast<SelectInst>
+      SelectInst *NV = cast<SelectInst>
         (Builder.CreateSelect(PBICond, PBIV, BIV, PBIV->getName() + ".mux"));
       PN->setIncomingValue(PBBIdx, NV);
+      // Although the select has the same condition as PBI, the original branch
+      // weights for PBI do not apply to the new select because the select's
+      // 'logical' edges are incoming edges of the phi that is eliminated, not
+      // the outgoing edges of PBI.
+      if (PredHasWeights && SuccHasWeights) {
+        uint64_t PredCommon = PBIOp ? PredFalseWeight : PredTrueWeight;
+        uint64_t PredOther = PBIOp ? PredTrueWeight : PredFalseWeight;
+        uint64_t SuccCommon = BIOp ? SuccFalseWeight : SuccTrueWeight;
+        uint64_t SuccOther = BIOp ? SuccTrueWeight : SuccFalseWeight;
+        // The weight to PredCommonDest should be PredCommon * SuccTotal.
+        // The weight to PredOtherDest should be PredOther * SuccCommon.
+        uint64_t NewWeights[2] = {PredCommon * (SuccCommon + SuccOther),
+                                  PredOther * SuccCommon};
+
+        FitWeights(NewWeights);
+
+        NV->setMetadata(LLVMContext::MD_prof,
+                        MDBuilder(BI->getContext())
+                            .createBranchWeights(NewWeights[0], NewWeights[1]));
+      }
     }
   }
 
@@ -5076,7 +5069,7 @@ bool SimplifyCFGOpt::SimplifyUncondBranch(BranchInst *BI, IRBuilder<> &Builder){
   // in the back-end.)
   BasicBlock::iterator I = BB->getFirstNonPHIOrDbg()->getIterator();
   if (I->isTerminator() && BB != &BB->getParent()->getEntryBlock() &&
-      (!LoopHeaders || (LoopHeaders && !LoopHeaders->count(BB))) &&
+      (!LoopHeaders || !LoopHeaders->count(BB)) &&
       TryToSimplifyUncondBranchFromEmptyBlock(BB))
     return true;
 
@@ -5155,6 +5148,30 @@ bool SimplifyCFGOpt::SimplifyCondBranch(BranchInst *BI, IRBuilder<> &Builder) {
   // Try to turn "br (X == 0 | X == 1), T, F" into a switch instruction.
   if (SimplifyBranchOnICmpChain(BI, Builder, DL))
     return true;
+
+  // If this basic block has a single dominating predecessor block and the
+  // dominating block's condition implies BI's condition, we know the direction
+  // of the BI branch.
+  if (BasicBlock *Dom = BB->getSinglePredecessor()) {
+    auto *PBI = dyn_cast_or_null<BranchInst>(Dom->getTerminator());
+    if (PBI && PBI->isConditional() &&
+        PBI->getSuccessor(0) != PBI->getSuccessor(1) &&
+        (PBI->getSuccessor(0) == BB || PBI->getSuccessor(1) == BB)) {
+      bool CondIsFalse = PBI->getSuccessor(1) == BB;
+      Optional<bool> Implication = isImpliedCondition(
+          PBI->getCondition(), BI->getCondition(), DL, CondIsFalse);
+      if (Implication) {
+        // Turn this into a branch on constant.
+        auto *OldCond = BI->getCondition();
+        ConstantInt *CI = *Implication
+                              ? ConstantInt::getTrue(BB->getContext())
+                              : ConstantInt::getFalse(BB->getContext());
+        BI->setCondition(CI);
+        RecursivelyDeleteTriviallyDeadInstructions(OldCond);
+        return SimplifyCFG(BB, TTI, BonusInstThreshold, AC) | true;
+      }
+    }
+  }
 
   // If this basic block is ONLY a compare and a branch, and if a predecessor
   // branches to us and one of our successors, fold the comparison into the

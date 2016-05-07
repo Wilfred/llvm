@@ -356,7 +356,13 @@ unsigned MipsMCCodeEmitter::getBranchTarget26OpValueMM(
   if (MO.isImm())
     return MO.getImm() >> 1;
 
-  // TODO: Push 26 PC fixup.
+  assert(MO.isExpr() &&
+         "getBranchTarget26OpValueMM expects only expressions or immediates");
+
+  const MCExpr *FixupExpression = MCBinaryExpr::createAdd(
+      MO.getExpr(), MCConstantExpr::create(-4, Ctx), Ctx);
+  Fixups.push_back(MCFixup::create(0, FixupExpression,
+                                   MCFixupKind(Mips::fixup_MICROMIPS_PC26_S1)));
   return 0;
 }
 
@@ -503,20 +509,103 @@ getExprOpValue(const MCExpr *Expr, SmallVectorImpl<MCFixup> &Fixups,
 
     Mips::Fixups FixupKind = Mips::Fixups(0);
     switch (MipsExpr->getKind()) {
-    default: llvm_unreachable("Unsupported fixup kind for target expression!");
-    case MipsMCExpr::VK_Mips_HIGHEST:
+    case MipsMCExpr::MEK_NEG:
+    case MipsMCExpr::MEK_None:
+    case MipsMCExpr::MEK_Special:
+      llvm_unreachable("Unhandled fixup kind!");
+      break;
+    case MipsMCExpr::MEK_CALL_HI16:
+      FixupKind = Mips::fixup_Mips_CALL_HI16;
+      break;
+    case MipsMCExpr::MEK_CALL_LO16:
+      FixupKind = Mips::fixup_Mips_CALL_LO16;
+      break;
+    case MipsMCExpr::MEK_DTPREL_HI:
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_DTPREL_HI16
+                                   : Mips::fixup_Mips_DTPREL_HI;
+      break;
+    case MipsMCExpr::MEK_DTPREL_LO:
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_DTPREL_LO16
+                                   : Mips::fixup_Mips_DTPREL_LO;
+      break;
+    case MipsMCExpr::MEK_GOTTPREL:
+      FixupKind = Mips::fixup_Mips_GOTTPREL;
+      break;
+    case MipsMCExpr::MEK_GOT:
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_GOT16
+                                   : Mips::fixup_Mips_GOT;
+      break;
+    case MipsMCExpr::MEK_GOT_CALL:
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_CALL16
+                                   : Mips::fixup_Mips_CALL16;
+      break;
+    case MipsMCExpr::MEK_GOT_DISP:
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_GOT_DISP
+                                   : Mips::fixup_Mips_GOT_DISP;
+      break;
+    case MipsMCExpr::MEK_GOT_HI16:
+      FixupKind = Mips::fixup_Mips_GOT_HI16;
+      break;
+    case MipsMCExpr::MEK_GOT_LO16:
+      FixupKind = Mips::fixup_Mips_GOT_LO16;
+      break;
+    case MipsMCExpr::MEK_GOT_PAGE:
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_GOT_PAGE
+                                   : Mips::fixup_Mips_GOT_PAGE;
+      break;
+    case MipsMCExpr::MEK_GOT_OFST:
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_GOT_OFST
+                                   : Mips::fixup_Mips_GOT_OFST;
+      break;
+    case MipsMCExpr::MEK_GPREL:
+      FixupKind = Mips::fixup_Mips_GPREL16;
+      break;
+    case MipsMCExpr::MEK_LO: {
+      // Check for %lo(%neg(%gp_rel(X)))
+      if (MipsExpr->isGpOff()) {
+        FixupKind = Mips::fixup_Mips_GPOFF_LO;
+        break;
+      }
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_LO16
+                                   : Mips::fixup_Mips_LO16;
+      break;
+    }
+    case MipsMCExpr::MEK_HIGHEST:
       FixupKind = Mips::fixup_Mips_HIGHEST;
       break;
-    case MipsMCExpr::VK_Mips_HIGHER:
+    case MipsMCExpr::MEK_HIGHER:
       FixupKind = Mips::fixup_Mips_HIGHER;
       break;
-    case MipsMCExpr::VK_Mips_HI:
+    case MipsMCExpr::MEK_HI:
+      // Check for %hi(%neg(%gp_rel(X)))
+      if (MipsExpr->isGpOff()) {
+        FixupKind = Mips::fixup_Mips_GPOFF_HI;
+        break;
+      }
       FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_HI16
                                    : Mips::fixup_Mips_HI16;
       break;
-    case MipsMCExpr::VK_Mips_LO:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_LO16
-                                   : Mips::fixup_Mips_LO16;
+    case MipsMCExpr::MEK_PCREL_HI16:
+      FixupKind = Mips::fixup_MIPS_PCHI16;
+      break;
+    case MipsMCExpr::MEK_PCREL_LO16:
+      FixupKind = Mips::fixup_MIPS_PCLO16;
+      break;
+    case MipsMCExpr::MEK_TLSGD:
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_GD
+                                   : Mips::fixup_Mips_TLSGD;
+      break;
+    case MipsMCExpr::MEK_TLSLDM:
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_LDM
+                                   : Mips::fixup_Mips_TLSLDM;
+      break;
+    case MipsMCExpr::MEK_TPREL_HI:
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_TPREL_HI16
+                                   : Mips::fixup_Mips_TPREL_HI;
+      break;
+    case MipsMCExpr::MEK_TPREL_LO:
+      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_TPREL_LO16
+                                   : Mips::fixup_Mips_TPREL_LO;
       break;
     }
     Fixups.push_back(MCFixup::create(0, MipsExpr, MCFixupKind(FixupKind)));
@@ -531,98 +620,6 @@ getExprOpValue(const MCExpr *Expr, SmallVectorImpl<MCFixup> &Fixups,
       break;
     case MCSymbolRefExpr::VK_None:
       FixupKind = Mips::fixup_Mips_32; // FIXME: This is ok for O32/N32 but not N64.
-      break;
-    case MCSymbolRefExpr::VK_Mips_GPOFF_HI :
-      FixupKind = Mips::fixup_Mips_GPOFF_HI;
-      break;
-    case MCSymbolRefExpr::VK_Mips_GPOFF_LO :
-      FixupKind = Mips::fixup_Mips_GPOFF_LO;
-      break;
-    case MCSymbolRefExpr::VK_Mips_GOT_PAGE :
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_GOT_PAGE
-                              : Mips::fixup_Mips_GOT_PAGE;
-      break;
-    case MCSymbolRefExpr::VK_Mips_GOT_OFST :
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_GOT_OFST
-                              : Mips::fixup_Mips_GOT_OFST;
-      break;
-    case MCSymbolRefExpr::VK_Mips_GOT_DISP :
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_GOT_DISP
-                              : Mips::fixup_Mips_GOT_DISP;
-      break;
-    case MCSymbolRefExpr::VK_Mips_GPREL:
-      FixupKind = Mips::fixup_Mips_GPREL16;
-      break;
-    case MCSymbolRefExpr::VK_Mips_GOT_CALL:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_CALL16
-                              : Mips::fixup_Mips_CALL16;
-      break;
-    case MCSymbolRefExpr::VK_Mips_GOT16:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_GOT16
-                              : Mips::fixup_Mips_GOT_Global;
-      break;
-    case MCSymbolRefExpr::VK_Mips_GOT:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_GOT16
-                              : Mips::fixup_Mips_GOT_Local;
-      break;
-    case MCSymbolRefExpr::VK_Mips_ABS_HI:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_HI16
-                              : Mips::fixup_Mips_HI16;
-      break;
-    case MCSymbolRefExpr::VK_Mips_ABS_LO:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_LO16
-                              : Mips::fixup_Mips_LO16;
-      break;
-    case MCSymbolRefExpr::VK_Mips_TLSGD:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_GD
-                              : Mips::fixup_Mips_TLSGD;
-      break;
-    case MCSymbolRefExpr::VK_Mips_TLSLDM:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_LDM
-                              : Mips::fixup_Mips_TLSLDM;
-      break;
-    case MCSymbolRefExpr::VK_Mips_DTPREL_HI:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_DTPREL_HI16
-                              : Mips::fixup_Mips_DTPREL_HI;
-      break;
-    case MCSymbolRefExpr::VK_Mips_DTPREL_LO:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_DTPREL_LO16
-                              : Mips::fixup_Mips_DTPREL_LO;
-      break;
-    case MCSymbolRefExpr::VK_Mips_GOTTPREL:
-      FixupKind = Mips::fixup_Mips_GOTTPREL;
-      break;
-    case MCSymbolRefExpr::VK_Mips_TPREL_HI:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_TPREL_HI16
-                              : Mips::fixup_Mips_TPREL_HI;
-      break;
-    case MCSymbolRefExpr::VK_Mips_TPREL_LO:
-      FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_TLS_TPREL_LO16
-                              : Mips::fixup_Mips_TPREL_LO;
-      break;
-    case MCSymbolRefExpr::VK_Mips_HIGHER:
-      FixupKind = Mips::fixup_Mips_HIGHER;
-      break;
-    case MCSymbolRefExpr::VK_Mips_HIGHEST:
-      FixupKind = Mips::fixup_Mips_HIGHEST;
-      break;
-    case MCSymbolRefExpr::VK_Mips_GOT_HI16:
-      FixupKind = Mips::fixup_Mips_GOT_HI16;
-      break;
-    case MCSymbolRefExpr::VK_Mips_GOT_LO16:
-      FixupKind = Mips::fixup_Mips_GOT_LO16;
-      break;
-    case MCSymbolRefExpr::VK_Mips_CALL_HI16:
-      FixupKind = Mips::fixup_Mips_CALL_HI16;
-      break;
-    case MCSymbolRefExpr::VK_Mips_CALL_LO16:
-      FixupKind = Mips::fixup_Mips_CALL_LO16;
-      break;
-    case MCSymbolRefExpr::VK_Mips_PCREL_HI16:
-      FixupKind = Mips::fixup_MIPS_PCHI16;
-      break;
-    case MCSymbolRefExpr::VK_Mips_PCREL_LO16:
-      FixupKind = Mips::fixup_MIPS_PCLO16;
       break;
     } // switch
 
@@ -858,8 +855,9 @@ MipsMCCodeEmitter::getSimm19Lsl2Encoding(const MCInst &MI, unsigned OpNo,
          "getSimm19Lsl2Encoding expects only expressions or an immediate");
 
   const MCExpr *Expr = MO.getExpr();
-  Fixups.push_back(MCFixup::create(0, Expr,
-                                   MCFixupKind(Mips::fixup_MIPS_PC19_S2)));
+  Mips::Fixups FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_PC19_S2
+                                            : Mips::fixup_MIPS_PC19_S2;
+  Fixups.push_back(MCFixup::create(0, Expr, MCFixupKind(FixupKind)));
   return 0;
 }
 
@@ -879,8 +877,9 @@ MipsMCCodeEmitter::getSimm18Lsl3Encoding(const MCInst &MI, unsigned OpNo,
          "getSimm18Lsl2Encoding expects only expressions or an immediate");
 
   const MCExpr *Expr = MO.getExpr();
-  Fixups.push_back(MCFixup::create(0, Expr,
-                                   MCFixupKind(Mips::fixup_MIPS_PC18_S3)));
+  Mips::Fixups FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_PC18_S3
+                                            : Mips::fixup_MIPS_PC18_S3;
+  Fixups.push_back(MCFixup::create(0, Expr, MCFixupKind(FixupKind)));
   return 0;
 }
 

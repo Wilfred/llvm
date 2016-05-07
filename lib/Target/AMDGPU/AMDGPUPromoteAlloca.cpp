@@ -97,7 +97,7 @@ bool AMDGPUPromoteAlloca::doInitialization(Module &M) {
 }
 
 bool AMDGPUPromoteAlloca::runOnFunction(Function &F) {
-  if (!TM || F.hasFnAttribute(Attribute::OptimizeNone))
+  if (!TM || skipFunction(F))
     return false;
 
   FunctionType *FTy = F.getFunctionType();
@@ -125,14 +125,16 @@ bool AMDGPUPromoteAlloca::runOnFunction(Function &F) {
     if (GV.getType()->getAddressSpace() != AMDGPUAS::LOCAL_ADDRESS)
       continue;
 
-    for (Use &U : GV.uses()) {
+    for (User *U : GV.users()) {
       Instruction *Use = dyn_cast<Instruction>(U);
       if (!Use)
         continue;
 
-      if (Use->getParent()->getParent() == &F)
+      if (Use->getParent()->getParent() == &F) {
         LocalMemAvailable -=
           Mod->getDataLayout().getTypeAllocSize(GV.getValueType());
+        break;
+      }
     }
   }
 
@@ -481,7 +483,9 @@ static bool collectUsesWithPtrTypes(Value *Val, std::vector<Value*> &WorkList) {
 }
 
 void AMDGPUPromoteAlloca::handleAlloca(AllocaInst &I) {
-  if (!I.isStaticAlloca())
+  // Array allocations are probably not worth handling, since an allocation of
+  // the array type is the canonical form.
+  if (!I.isStaticAlloca() || I.isArrayAllocation())
     return;
 
   IRBuilder<> Builder(&I);
@@ -496,10 +500,12 @@ void AMDGPUPromoteAlloca::handleAlloca(AllocaInst &I) {
 
   DEBUG(dbgs() << " alloca is not a candidate for vectorization.\n");
 
-  // FIXME: This is the maximum work group size.  We should try to get
-  // value from the reqd_work_group_size function attribute if it is
-  // available.
-  unsigned WorkGroupSize = 256;
+  const Function &ContainingFunction = *I.getParent()->getParent();
+
+  // FIXME: We should also try to get this value from the reqd_work_group_size
+  // function attribute if it is available.
+  unsigned WorkGroupSize = AMDGPU::getMaximumWorkGroupSize(ContainingFunction);
+
   int AllocaSize =
       WorkGroupSize * Mod->getDataLayout().getTypeAllocSize(AllocaTy);
 
@@ -520,7 +526,7 @@ void AMDGPUPromoteAlloca::handleAlloca(AllocaInst &I) {
 
   Function *F = I.getParent()->getParent();
 
-  Type *GVTy = ArrayType::get(I.getAllocatedType(), 256);
+  Type *GVTy = ArrayType::get(I.getAllocatedType(), WorkGroupSize);
   GlobalVariable *GV = new GlobalVariable(
       *Mod, GVTy, false, GlobalValue::InternalLinkage,
       UndefValue::get(GVTy),
