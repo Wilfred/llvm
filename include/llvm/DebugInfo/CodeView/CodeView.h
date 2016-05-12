@@ -384,8 +384,8 @@ enum class PointerToMemberRepresentation : uint16_t {
 /// Distinguishes individual records in .debug$T section or PDB type stream. The
 /// documentation and headers talk about this as the "leaf" type.
 enum TypeLeafKind : uint16_t {
-#define LEAF_TYPE(name, val) name = val,
-#include "CVLeafTypes.def"
+#define CV_TYPE(name, val) name = val,
+#include "TypeRecords.def"
 };
 
 enum class TypeRecordKind : uint16_t {
@@ -423,9 +423,10 @@ enum class TypeRecordKind : uint16_t {
   Alias = 0x150a,
   Member = 0x150d,
   StaticMember = 0x150e,
-  Method = 0x150f,
+  OverloadedMethod = 0x150f,
   NestedType = 0x1510,
   OneMethod = 0x1511,
+  TypeServer2 = 0x1515,
   VirtualFunctionTable = 0x151d,
 
   FunctionId = 0x1601,

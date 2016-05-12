@@ -1125,7 +1125,7 @@ SDNode *AArch64DAGToDAGISel::SelectIndexedLoad(SDNode *N, bool &Done) {
   ReplaceUses(SDValue(N, 0), LoadedVal);
   ReplaceUses(SDValue(N, 1), SDValue(Res, 0));
   ReplaceUses(SDValue(N, 2), SDValue(Res, 2));
-
+  CurDAG->RemoveDeadNode(N);
   return nullptr;
 }
 
@@ -1147,6 +1147,7 @@ SDNode *AArch64DAGToDAGISel::SelectLoad(SDNode *N, unsigned NumVecs,
         CurDAG->getTargetExtractSubreg(SubRegIdx + i, dl, VT, SuperReg));
 
   ReplaceUses(SDValue(N, NumVecs), SDValue(Ld, 1));
+  CurDAG->RemoveDeadNode(N);
   return nullptr;
 }
 
@@ -1179,6 +1180,7 @@ SDNode *AArch64DAGToDAGISel::SelectPostLoad(SDNode *N, unsigned NumVecs,
 
   // Update the chain
   ReplaceUses(SDValue(N, NumVecs + 1), SDValue(Ld, 2));
+  CurDAG->RemoveDeadNode(N);
   return nullptr;
 }
 
@@ -1290,8 +1292,8 @@ SDNode *AArch64DAGToDAGISel::SelectLoadLane(SDNode *N, unsigned NumVecs,
   }
 
   ReplaceUses(SDValue(N, NumVecs), SDValue(Ld, 1));
-
-  return Ld;
+  CurDAG->RemoveDeadNode(N);
+  return nullptr;
 }
 
 SDNode *AArch64DAGToDAGISel::SelectPostLoadLane(SDNode *N, unsigned NumVecs,
@@ -1346,8 +1348,8 @@ SDNode *AArch64DAGToDAGISel::SelectPostLoadLane(SDNode *N, unsigned NumVecs,
 
   // Update the Chain
   ReplaceUses(SDValue(N, NumVecs + 1), SDValue(Ld, 2));
-
-  return Ld;
+  CurDAG->RemoveDeadNode(N);
+  return nullptr;
 }
 
 SDNode *AArch64DAGToDAGISel::SelectStoreLane(SDNode *N, unsigned NumVecs,
@@ -1849,6 +1851,20 @@ static void getUsefulBitsForUse(SDNode *UserNode, APInt &UsefulBits,
   case AArch64::BFMWri:
   case AArch64::BFMXri:
     return getUsefulBitsFromBFM(SDValue(UserNode, 0), Orig, UsefulBits, Depth);
+
+  case AArch64::STRBBui:
+  case AArch64::STURBBi:
+    if (UserNode->getOperand(0) != Orig)
+      return;
+    UsefulBits &= APInt(UsefulBits.getBitWidth(), 0xff);
+    return;
+
+  case AArch64::STRHHui:
+  case AArch64::STURHHi:
+    if (UserNode->getOperand(0) != Orig)
+      return;
+    UsefulBits &= APInt(UsefulBits.getBitWidth(), 0xffff);
+    return;
   }
 }
 
@@ -1970,20 +1986,16 @@ static bool isBitfieldPositioningOp(SelectionDAG *CurDAG, SDValue Op,
 // if yes, given reference arguments will be update so that one can replace
 // the OR instruction with:
 // f = Opc Opd0, Opd1, LSB, MSB ; where Opc is a BFM, LSB = imm, and MSB = imm2
-static bool isBitfieldInsertOpFromOr(SDNode *N, unsigned &Opc, SDValue &Dst,
-                                     SDValue &Src, unsigned &ImmR,
-                                     unsigned &ImmS, const APInt &UsefulBits,
-                                     SelectionDAG *CurDAG) {
+static SDNode *selectBitfieldInsertOpFromOr(SDNode *N, const APInt &UsefulBits,
+                                            SelectionDAG *CurDAG) {
   assert(N->getOpcode() == ISD::OR && "Expect a OR operation");
 
-  // Set Opc
+  SDValue Dst, Src;
+  unsigned ImmR, ImmS;
+
   EVT VT = N->getValueType(0);
-  if (VT == MVT::i32)
-    Opc = AArch64::BFMWri;
-  else if (VT == MVT::i64)
-    Opc = AArch64::BFMXri;
-  else
-    return false;
+  if (VT != MVT::i32 && VT != MVT::i64)
+    return nullptr;
 
   // Because of simplify-demanded-bits in DAGCombine, involved masks may not
   // have the expected shape. Try to undo that.
@@ -2067,37 +2079,28 @@ static bool isBitfieldInsertOpFromOr(SDNode *N, unsigned &Opc, SDValue &Dst,
       Dst = OrOpd1Val;
 
     // both parts match
-    return true;
+    SDLoc DL(N);
+    SDValue Ops[] = {Dst, Src, CurDAG->getTargetConstant(ImmR, DL, VT),
+                     CurDAG->getTargetConstant(ImmS, DL, VT)};
+    unsigned Opc = (VT == MVT::i32) ? AArch64::BFMWri : AArch64::BFMXri;
+    return CurDAG->SelectNodeTo(N, Opc, VT, Ops);
   }
-
-  return false;
+  return nullptr;
 }
 
 SDNode *AArch64DAGToDAGISel::SelectBitfieldInsertOp(SDNode *N) {
   if (N->getOpcode() != ISD::OR)
     return nullptr;
 
-  unsigned Opc;
-  unsigned LSB, MSB;
-  SDValue Opd0, Opd1;
-  EVT VT = N->getValueType(0);
   APInt NUsefulBits;
   getUsefulBits(SDValue(N, 0), NUsefulBits);
 
   // If all bits are not useful, just return UNDEF.
   if (!NUsefulBits)
-    return CurDAG->SelectNodeTo(N, TargetOpcode::IMPLICIT_DEF, VT);
+    return CurDAG->SelectNodeTo(N, TargetOpcode::IMPLICIT_DEF,
+                                N->getValueType(0));
 
-  if (!isBitfieldInsertOpFromOr(N, Opc, Opd0, Opd1, LSB, MSB, NUsefulBits,
-                                CurDAG))
-    return nullptr;
-
-  SDLoc dl(N);
-  SDValue Ops[] = { Opd0,
-                    Opd1,
-                    CurDAG->getTargetConstant(LSB, dl, VT),
-                    CurDAG->getTargetConstant(MSB, dl, VT) };
-  return CurDAG->SelectNodeTo(N, Opc, VT, Ops);
+  return selectBitfieldInsertOpFromOr(N, NUsefulBits, CurDAG);
 }
 
 /// SelectBitfieldInsertInZeroOp - Match a UBFIZ instruction that is the
@@ -2327,6 +2330,7 @@ void AArch64DAGToDAGISel::SelectCMP_SWAP(SDNode *N) {
 
   ReplaceUses(SDValue(N, 0), SDValue(CmpSwap, 0));
   ReplaceUses(SDValue(N, 1), SDValue(CmpSwap, 2));
+  CurDAG->RemoveDeadNode(N);
 }
 
 SDNode *AArch64DAGToDAGISel::SelectImpl(SDNode *Node) {

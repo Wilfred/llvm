@@ -11,9 +11,10 @@
 #define LLVM_DEBUGINFO_CODEVIEW_CVTYPEVISITOR_H
 
 #include "llvm/DebugInfo/CodeView/CodeView.h"
+#include "llvm/DebugInfo/CodeView/RecordIterator.h"
 #include "llvm/DebugInfo/CodeView/TypeIndex.h"
 #include "llvm/DebugInfo/CodeView/TypeRecord.h"
-#include "llvm/DebugInfo/CodeView/TypeStream.h"
+#include "llvm/Support/ErrorOr.h"
 
 namespace llvm {
 namespace codeview {
@@ -41,42 +42,38 @@ public:
   /// expected to consume the trailing bytes used by the field.
   /// FIXME: Make the visitor interpret the trailing bytes so that clients don't
   /// need to.
-#define TYPE_RECORD(ClassName, LeafEnum)                                       \
-  void visit##ClassName(TypeLeafKind LeafType, const ClassName *Record,        \
-                        ArrayRef<uint8_t> LeafData) {}
-#define TYPE_RECORD_ALIAS(ClassName, LeafEnum)
-#define MEMBER_RECORD(ClassName, LeafEnum)                                     \
-  void visit##ClassName(TypeLeafKind LeafType, const ClassName *Record,        \
-                        ArrayRef<uint8_t> &FieldData) {}
-#define MEMBER_RECORD_ALIAS(ClassName, LeafEnum)
+#define TYPE_RECORD(EnumName, EnumVal, ClassName, PrintName)                   \
+  void visit##ClassName(TypeLeafKind LeafType, ClassName &Record) {}
+#define TYPE_RECORD_ALIAS(EnumName, EnumVal, ClassName, PrintName)
+#define MEMBER_RECORD(EnumName, EnumVal, ClassName, PrintName)                 \
+  void visit##ClassName(TypeLeafKind LeafType, ClassName &Record) {}
+#define MEMBER_RECORD_ALIAS(EnumName, EnumVal, ClassName, PrintName)
 #include "TypeRecords.def"
 
-  void visitTypeRecord(const TypeIterator::TypeRecord &Record) {
-    ArrayRef<uint8_t> LeafData = Record.LeafData;
+  void visitTypeRecord(const TypeIterator::Record &Record) {
+    ArrayRef<uint8_t> LeafData = Record.Data;
     ArrayRef<uint8_t> RecordData = LeafData;
     auto *DerivedThis = static_cast<Derived *>(this);
-    DerivedThis->visitTypeBegin(Record.Leaf, RecordData);
-    switch (Record.Leaf) {
+    DerivedThis->visitTypeBegin(Record.Type, RecordData);
+    switch (Record.Type) {
     default:
-      DerivedThis->visitUnknownType(Record.Leaf);
+      DerivedThis->visitUnknownType(Record.Type);
       break;
     case LF_FIELDLIST:
-      DerivedThis->visitFieldList(Record.Leaf, LeafData);
+      DerivedThis->visitFieldList(Record.Type, LeafData);
       break;
-    case LF_METHODLIST:
-      DerivedThis->visitMethodList(Record.Leaf, LeafData);
-      break;
-#define TYPE_RECORD(ClassName, LeafEnum)                                       \
-  case LeafEnum: {                                                             \
-    const ClassName *Rec;                                                      \
-    if (!CVTypeVisitor::consumeObject(LeafData, Rec))                          \
-      return;                                                                  \
-    DerivedThis->visit##ClassName(Record.Leaf, Rec, LeafData);                 \
+#define TYPE_RECORD(EnumName, EnumVal, ClassName, PrintName)                   \
+  case EnumName: {                                                             \
+    TypeRecordKind RK = static_cast<TypeRecordKind>(EnumName);                 \
+    auto Result = ClassName::deserialize(RK, LeafData);                        \
+    if (Result.getError())                                                     \
+      return parseError();                                                     \
+    DerivedThis->visit##ClassName(Record.Type, *Result);                       \
     break;                                                                     \
   }
 #include "TypeRecords.def"
       }
-      DerivedThis->visitTypeEnd(Record.Leaf, RecordData);
+      DerivedThis->visitTypeEnd(Record.Type, RecordData);
   }
 
   /// Visits the type records in Data. Sets the error flag on parse failures.
@@ -118,12 +115,13 @@ public:
         // continue parsing past an unknown member type.
         visitUnknownMember(Leaf);
         return parseError();
-#define MEMBER_RECORD(ClassName, LeafEnum)                                     \
-  case LeafEnum: {                                                             \
-    const ClassName *Rec;                                                      \
-    if (!CVTypeVisitor::consumeObject(FieldData, Rec))                         \
-      return;                                                                  \
-    static_cast<Derived *>(this)->visit##ClassName(Leaf, Rec, FieldData);      \
+#define MEMBER_RECORD(EnumName, EnumVal, ClassName, PrintName)                 \
+  case EnumName: {                                                             \
+    TypeRecordKind RK = static_cast<TypeRecordKind>(EnumName);                 \
+    auto Result = ClassName::deserialize(RK, FieldData);                       \
+    if (Result.getError())                                                     \
+      return parseError();                                                     \
+    static_cast<Derived *>(this)->visit##ClassName(Leaf, *Result);             \
     break;                                                                     \
   }
 #include "TypeRecords.def"
@@ -131,12 +129,6 @@ public:
       FieldData = skipPadding(FieldData);
     }
   }
-
-  /// Action to take on method overload lists, which do not have a common record
-  /// prefix. The LeafData is composed of MethodListEntry objects, each of which
-  /// may have a trailing 32-bit vftable offset.
-  /// FIXME: Hoist this complexity into the visitor.
-  void visitMethodList(TypeLeafKind Leaf, ArrayRef<uint8_t> LeafData) {}
 
   /// Action to take on unknown members. By default, they are ignored. Member
   /// record parsing cannot recover from an unknown member record, so this

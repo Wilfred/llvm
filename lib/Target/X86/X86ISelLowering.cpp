@@ -308,16 +308,7 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1   , Expand);
   setOperationAction(ISD::FP_ROUND_INREG   , MVT::f32  , Expand);
 
-  if (Subtarget.is32Bit() && Subtarget.isTargetKnownWindowsMSVC()) {
-    // On 32 bit MSVC, `fmodf(f32)` is not defined - only `fmod(f64)`
-    // is. We should promote the value to 64-bits to solve this.
-    // This is what the CRT headers do - `fmodf` is an inline header
-    // function casting to f64 and calling `fmod`.
-    setOperationAction(ISD::FREM           , MVT::f32  , Promote);
-  } else {
-    setOperationAction(ISD::FREM           , MVT::f32  , Expand);
-  }
-
+  setOperationAction(ISD::FREM             , MVT::f32  , Expand);
   setOperationAction(ISD::FREM             , MVT::f64  , Expand);
   setOperationAction(ISD::FREM             , MVT::f80  , Expand);
   setOperationAction(ISD::FLT_ROUNDS_      , MVT::i32  , Custom);
@@ -1584,6 +1575,17 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
     setOperationAction(ISD::SDIVREM, MVT::i128, Custom);
     setOperationAction(ISD::UDIVREM, MVT::i128, Custom);
   }
+
+  // On 32 bit MSVC, `fmodf(f32)` is not defined - only `fmod(f64)`
+  // is. We should promote the value to 64-bits to solve this.
+  // This is what the CRT headers do - `fmodf` is an inline header
+  // function casting to f64 and calling `fmod`.
+  if (Subtarget.is32Bit() && Subtarget.isTargetKnownWindowsMSVC())
+    for (ISD::NodeType Op :
+         {ISD::FCEIL, ISD::FCOS, ISD::FEXP, ISD::FFLOOR, ISD::FREM, ISD::FLOG,
+          ISD::FLOG10, ISD::FPOW, ISD::FSIN})
+      if (isOperationExpand(Op, MVT::f32))
+        setOperationAction(Op, MVT::f32, Promote);
 
   // We have target-specific dag combine patterns for the following nodes:
   setTargetDAGCombine(ISD::VECTOR_SHUFFLE);
@@ -4339,10 +4341,7 @@ static SDValue getZeroVector(MVT VT, const X86Subtarget &Subtarget,
   SDValue Vec;
   if (!Subtarget.hasSSE2() && VT.is128BitVector()) {
     Vec = DAG.getConstantFP(+0.0, dl, MVT::v4f32);
-  } else if (!Subtarget.hasInt256() && VT.is256BitVector()) {
-    Vec = DAG.getConstantFP(+0.0, dl, MVT::v8f32);
   } else if (VT.getVectorElementType() == MVT::i1) {
-    // AVX512 can use "vpxord" for 512-bit zeros.
     assert((Subtarget.hasBWI() || VT.getVectorNumElements() <= 16) &&
            "Unexpected vector type");
     assert((Subtarget.hasVLX() || VT.getVectorNumElements() >= 8) &&
@@ -30183,6 +30182,61 @@ void X86TargetLowering::LowerAsmOperandForConstraint(SDValue Op,
   return TargetLowering::LowerAsmOperandForConstraint(Op, Constraint, Ops, DAG);
 }
 
+/// Check if \p RC is a general purpose register class.
+/// I.e., GR* or one of their variant.
+static bool isGRClass(const TargetRegisterClass &RC) {
+  switch (RC.getID()) {
+  case X86::GR8RegClassID:
+  case X86::GR8_ABCD_LRegClassID:
+  case X86::GR8_ABCD_HRegClassID:
+  case X86::GR8_NOREXRegClassID:
+  case X86::GR16RegClassID:
+  case X86::GR16_ABCDRegClassID:
+  case X86::GR16_NOREXRegClassID:
+  case X86::GR32RegClassID:
+  case X86::GR32_ABCDRegClassID:
+  case X86::GR32_TCRegClassID:
+  case X86::GR32_NOREXRegClassID:
+  case X86::GR32_NOAXRegClassID:
+  case X86::GR32_NOSPRegClassID:
+  case X86::GR32_NOREX_NOSPRegClassID:
+  case X86::GR32_ADRegClassID:
+  case X86::GR64RegClassID:
+  case X86::GR64_ABCDRegClassID:
+  case X86::GR64_TCRegClassID:
+  case X86::GR64_TCW64RegClassID:
+  case X86::GR64_NOREXRegClassID:
+  case X86::GR64_NOSPRegClassID:
+  case X86::GR64_NOREX_NOSPRegClassID:
+  case X86::LOW32_ADDR_ACCESSRegClassID:
+  case X86::LOW32_ADDR_ACCESS_RBPRegClassID:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// Check if \p RC is a general purpose register class.
+/// I.e., FR* / VR* or one of their variant.
+static bool isFRClass(const TargetRegisterClass &RC) {
+  switch (RC.getID()) {
+  case X86::FR32RegClassID:
+  case X86::FR32XRegClassID:
+  case X86::FR64RegClassID:
+  case X86::FR64XRegClassID:
+  case X86::FR128RegClassID:
+  case X86::VR64RegClassID:
+  case X86::VR128RegClassID:
+  case X86::VR128XRegClassID:
+  case X86::VR256RegClassID:
+  case X86::VR256XRegClassID:
+  case X86::VR512RegClassID:
+    return true;
+  default:
+    return false;
+  }
+}
+
 std::pair<unsigned, const TargetRegisterClass *>
 X86TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                                 StringRef Constraint,
@@ -30344,8 +30398,11 @@ X86TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
   // return "eax". This should even work for things like getting 64bit integer
   // registers when given an f64 type.
   const TargetRegisterClass *Class = Res.second;
-  if (Class == &X86::GR8RegClass || Class == &X86::GR16RegClass ||
-      Class == &X86::GR32RegClass || Class == &X86::GR64RegClass) {
+  // The generic code will match the first register class that contains the
+  // given register. Thus, based on the ordering of the tablegened file,
+  // the "plain" GR classes might not come first.
+  // Therefore, use a helper method.
+  if (isGRClass(*Class)) {
     unsigned Size = VT.getSizeInBits();
     if (Size == 1) Size = 8;
     unsigned DestReg = getX86SubSuperRegisterOrZero(Res.first, Size);
@@ -30361,11 +30418,7 @@ X86TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
       Res.first = 0;
       Res.second = nullptr;
     }
-  } else if (Class == &X86::FR32RegClass || Class == &X86::FR64RegClass ||
-             Class == &X86::VR128RegClass || Class == &X86::VR256RegClass ||
-             Class == &X86::FR32XRegClass || Class == &X86::FR64XRegClass ||
-             Class == &X86::VR128XRegClass || Class == &X86::VR256XRegClass ||
-             Class == &X86::VR512RegClass) {
+  } else if (isFRClass(*Class)) {
     // Handle references to XMM physical registers that got mapped into the
     // wrong class.  This can happen with constraints like {xmm0} where the
     // target independent register mapper will just pick the first match it can
