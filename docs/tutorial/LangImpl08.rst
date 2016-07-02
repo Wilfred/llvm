@@ -106,7 +106,7 @@ To see which features and CPUs that LLVM knows about, we can use
       ...
 
 For our example, we'll use the generic CPU without any additional
-features.
+features, options or relocation model.
 
 .. code-block:: c++
 
@@ -114,7 +114,8 @@ features.
   auto Features = "";
 
   TargetOptions opt;
-  auto TargetMachine = Target->createTargetMachine(TargetTriple, CPU, Features, opt);
+  auto RM = Optional<Reloc::Model>();
+  auto TargetMachine = Target->createTargetMachine(TargetTriple, CPU, Features, opt, RM);
 
 
 Configuring the Module
