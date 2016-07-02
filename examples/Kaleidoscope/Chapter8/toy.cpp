@@ -180,13 +180,6 @@ public:
                 std::unique_ptr<ExprAST> RHS)
       : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
   Value *codegen() override;
-
-  raw_ostream &dump(raw_ostream &out, int ind) override {
-    ExprAST::dump(out << "binary" << Op, ind);
-    LHS->dump(indent(out, ind) << "LHS:", ind + 1);
-    RHS->dump(indent(out, ind) << "RHS:", ind + 1);
-    return out;
-  }
 };
 
 /// CallExprAST - Expression class for function calls.
@@ -199,13 +192,6 @@ public:
               std::vector<std::unique_ptr<ExprAST>> Args)
       : Callee(Callee), Args(std::move(Args)) {}
   Value *codegen() override;
-
-  raw_ostream &dump(raw_ostream &out, int ind) override {
-    ExprAST::dump(out << "call " << Callee, ind);
-    for (const auto &Arg : Args)
-      Arg->dump(indent(out, ind + 1), ind + 1);
-    return out;
-  }
 };
 
 /// IfExprAST - Expression class for if/then/else.
@@ -217,14 +203,6 @@ public:
             std::unique_ptr<ExprAST> Else)
       : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
   Value *codegen() override;
-
-  raw_ostream &dump(raw_ostream &out, int ind) override {
-    ExprAST::dump(out << "if", ind);
-    Cond->dump(indent(out, ind) << "Cond:", ind + 1);
-    Then->dump(indent(out, ind) << "Then:", ind + 1);
-    Else->dump(indent(out, ind) << "Else:", ind + 1);
-    return out;
-  }
 };
 
 /// ForExprAST - Expression class for for/in.
@@ -239,15 +217,6 @@ public:
       : VarName(VarName), Start(std::move(Start)), End(std::move(End)),
         Step(std::move(Step)), Body(std::move(Body)) {}
   Value *codegen() override;
-
-  raw_ostream &dump(raw_ostream &out, int ind) override {
-    ExprAST::dump(out << "for", ind);
-    Start->dump(indent(out, ind) << "Cond:", ind + 1);
-    End->dump(indent(out, ind) << "End:", ind + 1);
-    Step->dump(indent(out, ind) << "Step:", ind + 1);
-    Body->dump(indent(out, ind) << "Body:", ind + 1);
-    return out;
-  }
 };
 
 /// VarExprAST - Expression class for var/in
@@ -261,14 +230,6 @@ public:
       std::unique_ptr<ExprAST> Body)
       : VarNames(std::move(VarNames)), Body(std::move(Body)) {}
   Value *codegen() override;
-
-  raw_ostream &dump(raw_ostream &out, int ind) override {
-    ExprAST::dump(out << "var", ind);
-    for (const auto &NamedVar : VarNames)
-      NamedVar.second->dump(indent(out, ind) << NamedVar.first << ':', ind + 1);
-    Body->dump(indent(out, ind) << "Body:", ind + 1);
-    return out;
-  }
 };
 
 /// PrototypeAST - This class represents the "prototype" for a function,
@@ -309,15 +270,7 @@ public:
               std::unique_ptr<ExprAST> Body)
       : Proto(std::move(Proto)), Body(std::move(Body)) {}
   Function *codegen();
-
-  raw_ostream &dump(raw_ostream &out, int ind) {
-    indent(out, ind) << "FunctionAST\n";
-    ++ind;
-    indent(out, ind) << "Body:";
-    return Body ? Body->dump(out, ind) : out << "null\n";
-  }
-};
-} // end anonymous namespace
+}; // end anonymous namespace
 
 //===----------------------------------------------------------------------===//
 // Parser
