@@ -278,6 +278,12 @@ enum NodeType : unsigned {
   VSTRC_CC,
   VSTRCZ_CC,
 
+  // Test Data Class.
+  //
+  // Operand 0: the value to test
+  // Operand 1: the bit mask
+  TDC,
+
   // Wrappers around the inner loop of an 8- or 16-bit ATOMIC_SWAP or
   // ATOMIC_LOAD_<op>.
   //
@@ -310,6 +316,19 @@ enum NodeType : unsigned {
   // Operand 4: the negative of operand 2, for rotating the other way
   // Operand 5: the width of the field in bits (8 or 16)
   ATOMIC_CMP_SWAPW,
+
+  // Byte swapping load.
+  //
+  // Operand 0: the address to load from
+  // Operand 1: the type of load (i16, i32, i64)
+  LRV,
+
+  // Byte swapping store.
+  //
+  // Operand 0: the value to store
+  // Operand 1: the address to store to
+  // Operand 2: the type of store (i16, i32, i64)
+  STRV,
 
   // Prefetch from the second operand using the 4-bit control code in
   // the first operand.  The code is 1 for a load prefetch and 2 for
@@ -433,16 +452,16 @@ public:
   void insertSSPDeclarations(Module &M) const override {
   }
 
-  MachineBasicBlock *EmitInstrWithCustomInserter(MachineInstr *MI,
-                                                 MachineBasicBlock *BB) const
-    override;
+  MachineBasicBlock *
+  EmitInstrWithCustomInserter(MachineInstr &MI,
+                              MachineBasicBlock *BB) const override;
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
   bool allowTruncateForTailCall(Type *, Type *) const override;
   bool mayBeEmittedAsTailCall(CallInst *CI) const override;
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool isVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
-                               SDLoc DL, SelectionDAG &DAG,
+                               const SDLoc &DL, SelectionDAG &DAG,
                                SmallVectorImpl<SDValue> &InVals) const override;
   SDValue LowerCall(CallLoweringInfo &CLI,
                     SmallVectorImpl<SDValue> &InVals) const override;
@@ -453,9 +472,9 @@ public:
                       LLVMContext &Context) const override;
   SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
                       const SmallVectorImpl<ISD::OutputArg> &Outs,
-                      const SmallVectorImpl<SDValue> &OutVals,
-                      SDLoc DL, SelectionDAG &DAG) const override;
-  SDValue prepareVolatileOrAtomicLoad(SDValue Chain, SDLoc DL,
+                      const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
+                      SelectionDAG &DAG) const override;
+  SDValue prepareVolatileOrAtomicLoad(SDValue Chain, const SDLoc &DL,
                                       SelectionDAG &DAG) const override;
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
@@ -521,11 +540,18 @@ private:
                                  unsigned UnpackHigh) const;
   SDValue lowerShift(SDValue Op, SelectionDAG &DAG, unsigned ByScalar) const;
 
-  SDValue combineExtract(SDLoc DL, EVT ElemVT, EVT VecVT, SDValue OrigOp,
+  SDValue combineExtract(const SDLoc &DL, EVT ElemVT, EVT VecVT, SDValue OrigOp,
                          unsigned Index, DAGCombinerInfo &DCI,
                          bool Force) const;
-  SDValue combineTruncateExtract(SDLoc DL, EVT TruncVT, SDValue Op,
+  SDValue combineTruncateExtract(const SDLoc &DL, EVT TruncVT, SDValue Op,
                                  DAGCombinerInfo &DCI) const;
+  SDValue combineSIGN_EXTEND(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue combineMERGE(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue combineSTORE(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue combineEXTRACT_VECTOR_ELT(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue combineJOIN_DWORDS(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue combineFP_ROUND(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue combineBSWAP(SDNode *N, DAGCombinerInfo &DCI) const;
 
   // If the last instruction before MBBI in MBB was some form of COMPARE,
   // try to replace it with a COMPARE AND BRANCH just before MBBI.
@@ -537,40 +563,33 @@ private:
                                   MachineBasicBlock *Target) const;
 
   // Implement EmitInstrWithCustomInserter for individual operation types.
-  MachineBasicBlock *emitSelect(MachineInstr *MI,
-                                MachineBasicBlock *BB) const;
-  MachineBasicBlock *emitCondStore(MachineInstr *MI,
-                                   MachineBasicBlock *BB,
+  MachineBasicBlock *emitSelect(MachineInstr &MI, MachineBasicBlock *BB) const;
+  MachineBasicBlock *emitCondStore(MachineInstr &MI, MachineBasicBlock *BB,
                                    unsigned StoreOpcode, unsigned STOCOpcode,
                                    bool Invert) const;
-  MachineBasicBlock *emitExt128(MachineInstr *MI,
-                                MachineBasicBlock *MBB,
+  MachineBasicBlock *emitExt128(MachineInstr &MI, MachineBasicBlock *MBB,
                                 bool ClearEven, unsigned SubReg) const;
-  MachineBasicBlock *emitAtomicLoadBinary(MachineInstr *MI,
+  MachineBasicBlock *emitAtomicLoadBinary(MachineInstr &MI,
                                           MachineBasicBlock *BB,
                                           unsigned BinOpcode, unsigned BitSize,
                                           bool Invert = false) const;
-  MachineBasicBlock *emitAtomicLoadMinMax(MachineInstr *MI,
+  MachineBasicBlock *emitAtomicLoadMinMax(MachineInstr &MI,
                                           MachineBasicBlock *MBB,
                                           unsigned CompareOpcode,
                                           unsigned KeepOldMask,
                                           unsigned BitSize) const;
-  MachineBasicBlock *emitAtomicCmpSwapW(MachineInstr *MI,
+  MachineBasicBlock *emitAtomicCmpSwapW(MachineInstr &MI,
                                         MachineBasicBlock *BB) const;
-  MachineBasicBlock *emitMemMemWrapper(MachineInstr *MI,
-                                       MachineBasicBlock *BB,
+  MachineBasicBlock *emitMemMemWrapper(MachineInstr &MI, MachineBasicBlock *BB,
                                        unsigned Opcode) const;
-  MachineBasicBlock *emitStringWrapper(MachineInstr *MI,
-                                       MachineBasicBlock *BB,
+  MachineBasicBlock *emitStringWrapper(MachineInstr &MI, MachineBasicBlock *BB,
                                        unsigned Opcode) const;
-  MachineBasicBlock *emitTransactionBegin(MachineInstr *MI,
+  MachineBasicBlock *emitTransactionBegin(MachineInstr &MI,
                                           MachineBasicBlock *MBB,
-                                          unsigned Opcode,
-                                          bool NoFloat) const;
-  MachineBasicBlock *emitLoadAndTestCmp0(MachineInstr *MI,
+                                          unsigned Opcode, bool NoFloat) const;
+  MachineBasicBlock *emitLoadAndTestCmp0(MachineInstr &MI,
                                          MachineBasicBlock *MBB,
                                          unsigned Opcode) const;
-
 };
 } // end namespace llvm
 

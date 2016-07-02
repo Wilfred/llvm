@@ -83,7 +83,7 @@ ModulePass *createGCOVProfilerPass(const GCOVOptions &Options =
 ModulePass *createPGOInstrumentationGenLegacyPass();
 ModulePass *
 createPGOInstrumentationUseLegacyPass(StringRef Filename = StringRef(""));
-ModulePass *createPGOIndirectCallPromotionPass(bool InLTO = false);
+ModulePass *createPGOIndirectCallPromotionLegacyPass(bool InLTO = false);
 
 /// Options for the frontend instrumentation based profiling pass.
 struct InstrProfOptions {
@@ -102,7 +102,8 @@ ModulePass *createInstrProfilingLegacyPass(
 
 // Insert AddressSanitizer (address sanity checking) instrumentation
 FunctionPass *createAddressSanitizerFunctionPass(bool CompileKernel = false,
-                                                 bool Recover = false);
+                                                 bool Recover = false,
+                                                 bool UseAfterScope = false);
 ModulePass *createAddressSanitizerModulePass(bool CompileKernel = false,
                                              bool Recover = false);
 
@@ -123,11 +124,12 @@ struct EfficiencySanitizerOptions {
   enum Type {
     ESAN_None = 0,
     ESAN_CacheFrag,
+    ESAN_WorkingSet,
   } ToolType;
 };
 
 // Insert EfficiencySanitizer instrumentation.
-FunctionPass *createEfficiencySanitizerPass(
+ModulePass *createEfficiencySanitizerPass(
     const EfficiencySanitizerOptions &Options = EfficiencySanitizerOptions());
 
 // Options for sanitizer coverage instrumentation.

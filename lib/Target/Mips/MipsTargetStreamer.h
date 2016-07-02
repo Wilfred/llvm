@@ -13,10 +13,10 @@
 #include "MCTargetDesc/MipsABIFlagsSection.h"
 #include "MCTargetDesc/MipsABIInfo.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
-#include <functional>
 
 namespace llvm {
 
@@ -30,6 +30,7 @@ public:
 
   virtual void emitDirectiveSetMicroMips();
   virtual void emitDirectiveSetNoMicroMips();
+  virtual void setUsesMicroMips();
   virtual void emitDirectiveSetMips16();
   virtual void emitDirectiveSetNoMips16();
 
@@ -83,7 +84,7 @@ public:
   // PIC support
   virtual void emitDirectiveCpLoad(unsigned RegNo);
   virtual bool emitDirectiveCpRestore(int Offset,
-                                      std::function<unsigned()> GetATReg,
+                                      function_ref<unsigned()> GetATReg,
                                       SMLoc IDLoc, const MCSubtargetInfo *STI);
   virtual void emitDirectiveCpsetup(unsigned RegNo, int RegOrOffset,
                                     const MCSymbol &Sym, bool IsReg);
@@ -132,7 +133,7 @@ public:
   /// by reporting an error).
   void emitStoreWithImmOffset(unsigned Opcode, unsigned SrcReg,
                               unsigned BaseReg, int64_t Offset,
-                              std::function<unsigned()> GetATReg, SMLoc IDLoc,
+                              function_ref<unsigned()> GetATReg, SMLoc IDLoc,
                               const MCSubtargetInfo *STI);
   void emitStoreWithSymOffset(unsigned Opcode, unsigned SrcReg,
                               unsigned BaseReg, MCOperand &HiOperand,
@@ -254,7 +255,7 @@ public:
   /// temporary and is only called when the assembler temporary is required. It
   /// must handle the case where no assembler temporary is available (typically
   /// by reporting an error).
-  bool emitDirectiveCpRestore(int Offset, std::function<unsigned()> GetATReg,
+  bool emitDirectiveCpRestore(int Offset, function_ref<unsigned()> GetATReg,
                               SMLoc IDLoc, const MCSubtargetInfo *STI) override;
   void emitDirectiveCpsetup(unsigned RegNo, int RegOrOffset,
                             const MCSymbol &Sym, bool IsReg) override;
@@ -290,6 +291,7 @@ public:
 
   void emitDirectiveSetMicroMips() override;
   void emitDirectiveSetNoMicroMips() override;
+  void setUsesMicroMips() override;
   void emitDirectiveSetMips16() override;
 
   void emitDirectiveSetNoReorder() override;
@@ -309,7 +311,7 @@ public:
 
   // PIC support
   void emitDirectiveCpLoad(unsigned RegNo) override;
-  bool emitDirectiveCpRestore(int Offset, std::function<unsigned()> GetATReg,
+  bool emitDirectiveCpRestore(int Offset, function_ref<unsigned()> GetATReg,
                               SMLoc IDLoc, const MCSubtargetInfo *STI) override;
   void emitDirectiveCpsetup(unsigned RegNo, int RegOrOffset,
                             const MCSymbol &Sym, bool IsReg) override;

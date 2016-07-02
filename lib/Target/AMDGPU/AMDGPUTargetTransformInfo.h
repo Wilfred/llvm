@@ -59,9 +59,10 @@ class AMDGPUTTIImpl final : public BasicTTIImplBase<AMDGPUTTIImpl> {
   }
 
 public:
-  explicit AMDGPUTTIImpl(const AMDGPUTargetMachine *TM, const DataLayout &DL)
-      : BaseT(TM, DL), ST(TM->getSubtargetImpl()),
-        TLI(ST->getTargetLowering()) {}
+  explicit AMDGPUTTIImpl(const AMDGPUTargetMachine *TM, const Function &F)
+    : BaseT(TM, F.getParent()->getDataLayout()),
+      ST(TM->getSubtargetImpl(F)),
+      TLI(ST->getTargetLowering()) {}
 
   // Provide value semantics. MSVC requires that we spell all of these out.
   AMDGPUTTIImpl(const AMDGPUTTIImpl &Arg)
@@ -76,11 +77,12 @@ public:
 
   TTI::PopcntSupportKind getPopcntSupport(unsigned TyWidth) {
     assert(isPowerOf2_32(TyWidth) && "Ty width must be power of 2");
-    return ST->hasBCNT(TyWidth) ? TTI::PSK_FastHardware : TTI::PSK_Software;
+    return TTI::PSK_FastHardware;
   }
 
   unsigned getNumberOfRegisters(bool Vector);
   unsigned getRegisterBitWidth(bool Vector);
+  unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace);
   unsigned getMaxInterleaveFactor(unsigned VF);
 
   int getArithmeticInstrCost(

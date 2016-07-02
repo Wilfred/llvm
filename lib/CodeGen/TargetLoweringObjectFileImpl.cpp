@@ -34,7 +34,6 @@
 #include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/ProfileData/InstrProf.h"
-#include "llvm/ProfileData/ProfileCommon.h"
 #include "llvm/Support/COFF.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ELF.h"
@@ -70,11 +69,9 @@ void TargetLoweringObjectFileELF::emitPersonalityValue(
       cast<MCSymbolELF>(getContext().getOrCreateSymbol(NameData));
   Streamer.EmitSymbolAttribute(Label, MCSA_Hidden);
   Streamer.EmitSymbolAttribute(Label, MCSA_Weak);
-  StringRef Prefix = ".data.";
-  NameData.insert(NameData.begin(), Prefix.begin(), Prefix.end());
   unsigned Flags = ELF::SHF_ALLOC | ELF::SHF_WRITE | ELF::SHF_GROUP;
-  MCSection *Sec = getContext().getELFSection(NameData, ELF::SHT_PROGBITS,
-                                              Flags, 0, Label->getName());
+  MCSection *Sec = getContext().getELFNamedSection(".data", Label->getName(),
+                                                   ELF::SHT_PROGBITS, Flags, 0);
   unsigned Size = DL.getPointerSize();
   Streamer.SwitchSection(Sec);
   Streamer.EmitValueToAlignment(DL.getPointerABIAlignment());
@@ -245,11 +242,6 @@ static StringRef getSectionPrefixForGlobal(SectionKind Kind) {
   return ".data.rel.ro";
 }
 
-static cl::opt<bool> GroupFunctionsByHotness(
-    "group-functions-by-hotness",
-    llvm::cl::desc("Partition hot/cold functions by sections prefix"),
-    cl::init(false));
-
 static MCSectionELF *
 selectELFSectionForGlobal(MCContext &Ctx, const GlobalValue *GV,
                           SectionKind Kind, Mangler &Mang,
@@ -301,16 +293,8 @@ selectELFSectionForGlobal(MCContext &Ctx, const GlobalValue *GV,
   } else {
     Name = getSectionPrefixForGlobal(Kind);
   }
-
-  if (GroupFunctionsByHotness) {
-    if (const Function *F = dyn_cast<Function>(GV)) {
-      if (ProfileSummary::isFunctionHot(F)) {
-        Name += getHotSectionPrefix();
-      } else if (ProfileSummary::isFunctionUnlikely(F)) {
-        Name += getUnlikelySectionPrefix();
-      }
-    }
-  }
+  // FIXME: Extend the section prefix to include hotness catagories such as .hot
+  //  or .unlikely for functions.
 
   if (EmitUniqueSection && UniqueSectionNames) {
     Name.push_back('.');
@@ -443,7 +427,7 @@ const MCExpr *TargetLoweringObjectFileELF::lowerRelativeReference(
     const TargetMachine &TM) const {
   // We may only use a PLT-relative relocation to refer to unnamed_addr
   // functions.
-  if (!LHS->hasUnnamedAddr() || !LHS->getValueType()->isFunctionTy())
+  if (!LHS->hasGlobalUnnamedAddr() || !LHS->getValueType()->isFunctionTy())
     return nullptr;
 
   // Basic sanity checks.
@@ -700,9 +684,7 @@ const MCExpr *TargetLoweringObjectFileMachO::getTTypeGlobalReference(
 
     // Add information about the stub reference to MachOMMI so that the stub
     // gets emitted by the asmprinter.
-    MachineModuleInfoImpl::StubValueTy &StubSym =
-      GV->hasHiddenVisibility() ? MachOMMI.getHiddenGVStubEntry(SSym) :
-                                  MachOMMI.getGVStubEntry(SSym);
+    MachineModuleInfoImpl::StubValueTy &StubSym = MachOMMI.getGVStubEntry(SSym);
     if (!StubSym.getPointer()) {
       MCSymbol *Sym = TM.getSymbol(GV, Mang);
       StubSym = MachineModuleInfoImpl::StubValueTy(Sym, !GV->hasLocalLinkage());
@@ -825,8 +807,9 @@ void TargetLoweringObjectFileMachO::getNameWithPrefix(
 //===----------------------------------------------------------------------===//
 
 static unsigned
-getCOFFSectionFlags(SectionKind K) {
+getCOFFSectionFlags(SectionKind K, const TargetMachine &TM) {
   unsigned Flags = 0;
+  bool isThumb = TM.getTargetTriple().getArch() == Triple::thumb;
 
   if (K.isMetadata())
     Flags |=
@@ -835,7 +818,8 @@ getCOFFSectionFlags(SectionKind K) {
     Flags |=
       COFF::IMAGE_SCN_MEM_EXECUTE |
       COFF::IMAGE_SCN_MEM_READ |
-      COFF::IMAGE_SCN_CNT_CODE;
+      COFF::IMAGE_SCN_CNT_CODE |
+      (isThumb ? COFF::IMAGE_SCN_MEM_16BIT : (COFF::SectionCharacteristics)0);
   else if (K.isBSS())
     Flags |=
       COFF::IMAGE_SCN_CNT_UNINITIALIZED_DATA |
@@ -905,7 +889,7 @@ MCSection *TargetLoweringObjectFileCOFF::getExplicitSectionGlobal(
     const GlobalValue *GV, SectionKind Kind, Mangler &Mang,
     const TargetMachine &TM) const {
   int Selection = 0;
-  unsigned Characteristics = getCOFFSectionFlags(Kind);
+  unsigned Characteristics = getCOFFSectionFlags(Kind, TM);
   StringRef Name = GV->getSection();
   StringRef COMDATSymName = "";
   if (GV->hasComdat()) {
@@ -954,7 +938,7 @@ MCSection *TargetLoweringObjectFileCOFF::SelectSectionForGlobal(
 
   if ((EmitUniquedSection && !Kind.isCommon()) || GV->hasComdat()) {
     const char *Name = getCOFFSectionNameForUniqueGlobal(Kind);
-    unsigned Characteristics = getCOFFSectionFlags(Kind);
+    unsigned Characteristics = getCOFFSectionFlags(Kind, TM);
 
     Characteristics |= COFF::IMAGE_SCN_LNK_COMDAT;
     int Selection = getSelectionForCOFF(GV);
@@ -1031,7 +1015,7 @@ MCSection *TargetLoweringObjectFileCOFF::getSectionForJumpTable(
 
   SectionKind Kind = SectionKind::getReadOnly();
   const char *Name = getCOFFSectionNameForUniqueGlobal(Kind);
-  unsigned Characteristics = getCOFFSectionFlags(Kind);
+  unsigned Characteristics = getCOFFSectionFlags(Kind, TM);
   Characteristics |= COFF::IMAGE_SCN_LNK_COMDAT;
   unsigned UniqueID = NextUniqueID++;
 

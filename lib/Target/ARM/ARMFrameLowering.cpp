@@ -120,13 +120,11 @@ static bool isCSRestore(MachineInstr *MI,
   return false;
 }
 
-static void emitRegPlusImmediate(bool isARM, MachineBasicBlock &MBB,
-                                 MachineBasicBlock::iterator &MBBI, DebugLoc dl,
-                                 const ARMBaseInstrInfo &TII, unsigned DestReg,
-                                 unsigned SrcReg, int NumBytes,
-                                 unsigned MIFlags = MachineInstr::NoFlags,
-                                 ARMCC::CondCodes Pred = ARMCC::AL,
-                                 unsigned PredReg = 0) {
+static void emitRegPlusImmediate(
+    bool isARM, MachineBasicBlock &MBB, MachineBasicBlock::iterator &MBBI,
+    const DebugLoc &dl, const ARMBaseInstrInfo &TII, unsigned DestReg,
+    unsigned SrcReg, int NumBytes, unsigned MIFlags = MachineInstr::NoFlags,
+    ARMCC::CondCodes Pred = ARMCC::AL, unsigned PredReg = 0) {
   if (isARM)
     emitARMRegPlusImmediate(MBB, MBBI, dl, DestReg, SrcReg, NumBytes,
                             Pred, PredReg, TII, MIFlags);
@@ -136,7 +134,7 @@ static void emitRegPlusImmediate(bool isARM, MachineBasicBlock &MBB,
 }
 
 static void emitSPUpdate(bool isARM, MachineBasicBlock &MBB,
-                         MachineBasicBlock::iterator &MBBI, DebugLoc dl,
+                         MachineBasicBlock::iterator &MBBI, const DebugLoc &dl,
                          const ARMBaseInstrInfo &TII, int NumBytes,
                          unsigned MIFlags = MachineInstr::NoFlags,
                          ARMCC::CondCodes Pred = ARMCC::AL,
@@ -206,7 +204,8 @@ struct StackAdjustingInsts {
   }
 
   void emitDefCFAOffsets(MachineModuleInfo &MMI, MachineBasicBlock &MBB,
-                         DebugLoc dl, const ARMBaseInstrInfo &TII, bool HasFP) {
+                         const DebugLoc &dl, const ARMBaseInstrInfo &TII,
+                         bool HasFP) {
     unsigned CFAOffset = 0;
     for (auto &Info : Insts) {
       if (HasFP && !Info.BeforeFPSet)
@@ -235,7 +234,7 @@ static void emitAligningInstructions(MachineFunction &MF, ARMFunctionInfo *AFI,
                                      const TargetInstrInfo &TII,
                                      MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator MBBI,
-                                     DebugLoc DL, const unsigned Reg,
+                                     const DebugLoc &DL, const unsigned Reg,
                                      const unsigned Alignment,
                                      const bool MustBeSingleInstruction) {
   const ARMSubtarget &AST =
@@ -355,7 +354,7 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF,
     case ARM::R10:
     case ARM::R11:
     case ARM::R12:
-      if (STI.isTargetMachO()) {
+      if (STI.splitFramePushPop()) {
         GPRCS2Size += 4;
         break;
       }
@@ -559,7 +558,7 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF,
       case ARM::R10:
       case ARM::R11:
       case ARM::R12:
-        if (STI.isTargetMachO())
+        if (STI.splitFramePushPop())
           break;
         // fallthrough
       case ARM::R0:
@@ -592,7 +591,7 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF,
       case ARM::R10:
       case ARM::R11:
       case ARM::R12:
-        if (STI.isTargetMachO()) {
+        if (STI.splitFramePushPop()) {
           unsigned DwarfReg =  MRI->getDwarfRegNum(Reg, true);
           unsigned Offset = MFI->getObjectOffset(FI);
           unsigned CFIIndex = MMI.addFrameInst(
@@ -904,7 +903,7 @@ void ARMFrameLowering::emitPushInst(MachineBasicBlock &MBB,
     unsigned LastReg = 0;
     for (; i != 0; --i) {
       unsigned Reg = CSI[i-1].getReg();
-      if (!(Func)(Reg, STI.isTargetMachO())) continue;
+      if (!(Func)(Reg, STI.splitFramePushPop())) continue;
 
       // D-registers in the aligned area DPRCS2 are NOT spilled here.
       if (Reg >= ARM::D8 && Reg < ARM::D8 + NumAlignedDPRCS2Regs)
@@ -985,7 +984,7 @@ void ARMFrameLowering::emitPopInst(MachineBasicBlock &MBB,
     bool DeleteRet = false;
     for (; i != 0; --i) {
       unsigned Reg = CSI[i-1].getReg();
-      if (!(Func)(Reg, STI.isTargetMachO())) continue;
+      if (!(Func)(Reg, STI.splitFramePushPop())) continue;
 
       // The aligned reloads from area DPRCS2 are not inserted here.
       if (Reg >= ARM::D8 && Reg < ARM::D8 + NumAlignedDPRCS2Regs)
@@ -1361,7 +1360,7 @@ static unsigned GetFunctionSizeInBytes(const MachineFunction &MF,
   unsigned FnSize = 0;
   for (auto &MBB : MF) {
     for (auto &MI : MBB)
-      FnSize += TII.GetInstSizeInBytes(&MI);
+      FnSize += TII.GetInstSizeInBytes(MI);
   }
   return FnSize;
 }
@@ -1549,7 +1548,7 @@ void ARMFrameLowering::determineCalleeSaves(MachineFunction &MF,
     if (Spilled) {
       NumGPRSpills++;
 
-      if (!STI.isTargetMachO()) {
+      if (!STI.splitFramePushPop()) {
         if (Reg == ARM::LR)
           LRSpilled = true;
         CS1Spilled = true;
@@ -1571,7 +1570,7 @@ void ARMFrameLowering::determineCalleeSaves(MachineFunction &MF,
         break;
       }
     } else {
-      if (!STI.isTargetMachO()) {
+      if (!STI.splitFramePushPop()) {
         UnspilledCS1GPRs.push_back(Reg);
         continue;
       }

@@ -103,6 +103,7 @@ namespace {
 
     bool runOnMachineFunction(MachineFunction &Fn) override;
 
+  private:
     bool enablePostRAScheduler(
         const TargetSubtargetInfo &ST, CodeGenOpt::Level OptLevel,
         TargetSubtargetInfo::AntiDepBreakMode &Mode,
@@ -269,6 +270,11 @@ bool PostRAScheduler::enablePostRAScheduler(
     TargetSubtargetInfo::RegClassVector &CriticalPathRCs) const {
   Mode = ST.getAntiDepBreakMode();
   ST.getCriticalPathRCs(CriticalPathRCs);
+
+  // Check for explicit enable/disable of post-ra scheduling.
+  if (EnablePostRAScheduler.getPosition() > 0)
+    return EnablePostRAScheduler;
+
   return ST.enablePostRAScheduler() &&
          OptLevel >= ST.getOptLevelToEnablePostRAScheduler();
 }
@@ -284,20 +290,15 @@ bool PostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
 
   RegClassInfo.runOnMachineFunction(Fn);
 
-  // Check for explicit enable/disable of post-ra scheduling.
   TargetSubtargetInfo::AntiDepBreakMode AntiDepMode =
     TargetSubtargetInfo::ANTIDEP_NONE;
   SmallVector<const TargetRegisterClass*, 4> CriticalPathRCs;
-  if (EnablePostRAScheduler.getPosition() > 0) {
-    if (!EnablePostRAScheduler)
-      return false;
-  } else {
-    // Check that post-RA scheduling is enabled for this target.
-    // This may upgrade the AntiDepMode.
-    if (!enablePostRAScheduler(Fn.getSubtarget(), PassConfig->getOptLevel(),
-                               AntiDepMode, CriticalPathRCs))
-      return false;
-  }
+
+  // Check that post-RA scheduling is enabled for this target.
+  // This may upgrade the AntiDepMode.
+  if (!enablePostRAScheduler(Fn.getSubtarget(), PassConfig->getOptLevel(),
+                             AntiDepMode, CriticalPathRCs))
+    return false;
 
   // Check for antidep breaking override...
   if (EnableAntiDepBreaking.getPosition() > 0) {
@@ -334,24 +335,24 @@ bool PostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
     MachineBasicBlock::iterator Current = MBB.end();
     unsigned Count = MBB.size(), CurrentCount = Count;
     for (MachineBasicBlock::iterator I = Current; I != MBB.begin();) {
-      MachineInstr *MI = std::prev(I);
+      MachineInstr &MI = *std::prev(I);
       --Count;
       // Calls are not scheduling boundaries before register allocation, but
       // post-ra we don't gain anything by scheduling across calls since we
       // don't need to worry about register pressure.
-      if (MI->isCall() || TII->isSchedulingBoundary(MI, &MBB, Fn)) {
+      if (MI.isCall() || TII->isSchedulingBoundary(MI, &MBB, Fn)) {
         Scheduler.enterRegion(&MBB, I, Current, CurrentCount - Count);
         Scheduler.setEndIndex(CurrentCount);
         Scheduler.schedule();
         Scheduler.exitRegion();
         Scheduler.EmitSchedule();
-        Current = MI;
+        Current = &MI;
         CurrentCount = Count;
-        Scheduler.Observe(*MI, CurrentCount);
+        Scheduler.Observe(MI, CurrentCount);
       }
       I = MI;
-      if (MI->isBundle())
-        Count -= MI->getBundleSize();
+      if (MI.isBundle())
+        Count -= MI.getBundleSize();
     }
     assert(Count == 0 && "Instruction count mismatch!");
     assert((MBB.begin() == Current || CurrentCount != 0) &&

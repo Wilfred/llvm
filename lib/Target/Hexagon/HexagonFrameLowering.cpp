@@ -125,7 +125,7 @@ using namespace llvm;
 static cl::opt<bool> DisableDeallocRet("disable-hexagon-dealloc-ret",
     cl::Hidden, cl::desc("Disable Dealloc Return for Hexagon target"));
 
-static cl::opt<int> NumberScavengerSlots("number-scavenger-slots",
+static cl::opt<unsigned> NumberScavengerSlots("number-scavenger-slots",
     cl::Hidden, cl::desc("Set the number of scavenger slots"), cl::init(2),
     cl::ZeroOrMore);
 
@@ -222,8 +222,8 @@ namespace {
   /// Returns the callee saved register with the largest id in the vector.
   unsigned getMaxCalleeSavedReg(const std::vector<CalleeSavedInfo> &CSI,
                                 const TargetRegisterInfo &TRI) {
-    assert(Hexagon::R1 > 0 &&
-           "Assume physical registers are encoded as positive integers");
+    static_assert(Hexagon::R1 > 0,
+                  "Assume physical registers are encoded as positive integers");
     if (CSI.empty())
       return 0;
 
@@ -289,6 +289,26 @@ namespace {
     for (auto I = MBB.getFirstTerminator(), E = MBB.end(); I != E; ++I)
       if (I->isReturn())
         return true;
+    return false;
+  }
+
+  /// Returns the "return" instruction from this block, or nullptr if there
+  /// isn't any.
+  MachineInstr *getReturn(MachineBasicBlock &MBB) {
+    for (auto &I : MBB)
+      if (I.isReturn())
+        return &I;
+    return nullptr;
+  }
+
+  bool isRestoreCall(unsigned Opc) {
+    switch (Opc) {
+      case Hexagon::RESTORE_DEALLOC_RET_JMP_V4:
+      case Hexagon::RESTORE_DEALLOC_RET_JMP_V4_PIC:
+      case Hexagon::RESTORE_DEALLOC_BEFORE_TAILCALL_V4:
+      case Hexagon::RESTORE_DEALLOC_BEFORE_TAILCALL_V4_PIC:
+        return true;
+    }
     return false;
   }
 
@@ -445,6 +465,28 @@ void HexagonFrameLowering::emitPrologue(MachineFunction &MF,
     for (auto &B : MF)
       if (B.isReturnBlock())
         insertEpilogueInBlock(B);
+
+    for (auto &B : MF) {
+      if (B.empty())
+        continue;
+      MachineInstr *RetI = getReturn(B);
+      if (!RetI || isRestoreCall(RetI->getOpcode()))
+        continue;
+      for (auto &R : CSI)
+        RetI->addOperand(MachineOperand::CreateReg(R.getReg(), false, true));
+    }
+  }
+
+  if (EpilogB) {
+    // If there is an epilog block, it may not have a return instruction.
+    // In such case, we need to add the callee-saved registers as live-ins
+    // in all blocks on all paths from the epilog to any return block.
+    unsigned MaxBN = 0;
+    for (auto &B : MF)
+      if (B.getNumber() >= 0)
+        MaxBN = std::max(MaxBN, unsigned(B.getNumber()));
+    BitVector DoneT(MaxBN+1), DoneF(MaxBN+1), Path(MaxBN+1);
+    updateExitPaths(*EpilogB, EpilogB, DoneT, DoneF, Path);
   }
 }
 
@@ -544,13 +586,7 @@ void HexagonFrameLowering::insertEpilogueInBlock(MachineBasicBlock &MBB) const {
   auto &HRI = *HST.getRegisterInfo();
   unsigned SP = HRI.getStackRegister();
 
-  MachineInstr *RetI = nullptr;
-  for (auto &I : MBB) {
-    if (!I.isReturn())
-      continue;
-    RetI = &I;
-    break;
-  }
+  MachineInstr *RetI = getReturn(MBB);
   unsigned RetOpc = RetI ? RetI->getOpcode() : 0;
 
   MachineBasicBlock::iterator InsertPt = MBB.getFirstTerminator();
@@ -611,6 +647,51 @@ void HexagonFrameLowering::insertEpilogueInBlock(MachineBasicBlock &MBB) const {
   // Transfer the function live-out registers.
   NewI->copyImplicitOps(MF, *RetI);
   MBB.erase(RetI);
+}
+
+
+bool HexagonFrameLowering::updateExitPaths(MachineBasicBlock &MBB,
+      MachineBasicBlock *RestoreB, BitVector &DoneT, BitVector &DoneF,
+      BitVector &Path) const {
+  assert(MBB.getNumber() >= 0);
+  unsigned BN = MBB.getNumber();
+  if (Path[BN] || DoneF[BN])
+    return false;
+  if (DoneT[BN])
+    return true;
+
+  auto &CSI = MBB.getParent()->getFrameInfo()->getCalleeSavedInfo();
+
+  Path[BN] = true;
+  bool ReachedExit = false;
+  for (auto &SB : MBB.successors())
+    ReachedExit |= updateExitPaths(*SB, RestoreB, DoneT, DoneF, Path);
+
+  if (!MBB.empty() && MBB.back().isReturn()) {
+    // Add implicit uses of all callee-saved registers to the reached
+    // return instructions. This is to prevent the anti-dependency breaker
+    // from renaming these registers.
+    MachineInstr &RetI = MBB.back();
+    if (!isRestoreCall(RetI.getOpcode()))
+      for (auto &R : CSI)
+        RetI.addOperand(MachineOperand::CreateReg(R.getReg(), false, true));
+    ReachedExit = true;
+  }
+
+  // We don't want to add unnecessary live-ins to the restore block: since
+  // the callee-saved registers are being defined in it, the entry of the
+  // restore block cannot be on the path from the definitions to any exit.
+  if (ReachedExit && &MBB != RestoreB) {
+    for (auto &R : CSI)
+      if (!MBB.isLiveIn(R.getReg()))
+        MBB.addLiveIn(R.getReg());
+    DoneT[BN] = true;
+  }
+  if (!ReachedExit)
+    DoneF[BN] = true;
+
+  Path[BN] = false;
+  return ReachedExit;
 }
 
 
@@ -977,7 +1058,7 @@ bool HexagonFrameLowering::insertCSRSpillsInBlock(MachineBasicBlock &MBB,
     const char *SpillFun = getSpillFunctionFor(MaxReg, SK_ToMem,
                                                StkOvrFlowEnabled);
     auto &HTM = static_cast<const HexagonTargetMachine&>(MF.getTarget());
-    bool IsPIC = HTM.getRelocationModel() == Reloc::PIC_;
+    bool IsPIC = HTM.isPositionIndependent();
 
     // Call spill function.
     DebugLoc DL = MI != MBB.end() ? MI->getDebugLoc() : DebugLoc();
@@ -1031,7 +1112,7 @@ bool HexagonFrameLowering::insertCSRRestoresInBlock(MachineBasicBlock &MBB,
     SpillKind Kind = HasTC ? SK_FromMemTailcall : SK_FromMem;
     const char *RestoreFn = getSpillFunctionFor(MaxR, Kind);
     auto &HTM = static_cast<const HexagonTargetMachine&>(MF.getTarget());
-    bool IsPIC = HTM.getRelocationModel() == Reloc::PIC_;
+    bool IsPIC = HTM.isPositionIndependent();
 
     // Call spill function.
     DebugLoc DL = MI != MBB.end() ? MI->getDebugLoc()
@@ -1121,11 +1202,10 @@ void HexagonFrameLowering::processFunctionBeforeFrameFinalized(
   HMFI.setStackAlignBasePhysReg(AP);
 }
 
-/// Returns true if there is no caller saved registers available.
+/// Returns true if there are no caller-saved registers available in class RC.
 static bool needToReserveScavengingSpillSlots(MachineFunction &MF,
-                                              const HexagonRegisterInfo &HRI) {
+      const HexagonRegisterInfo &HRI, const TargetRegisterClass *RC) {
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  BitVector Reserved = HRI.getReservedRegs(MF);
 
   auto IsUsed = [&HRI,&MRI] (unsigned Reg) -> bool {
     for (MCRegAliasIterator AI(Reg, &HRI, true); AI.isValid(); ++AI)
@@ -1136,7 +1216,7 @@ static bool needToReserveScavengingSpillSlots(MachineFunction &MF,
 
   // Check for an unused caller-saved register. Callee-saved registers
   // have become pristine by now.
-  for (const MCPhysReg *P = HRI.getCallerSavedRegs(&MF); *P; ++P)
+  for (const MCPhysReg *P = HRI.getCallerSavedRegs(&MF, RC); *P; ++P)
     if (!IsUsed(*P))
       return false;
 
@@ -1717,26 +1797,26 @@ void HexagonFrameLowering::determineCalleeSaves(MachineFunction &MF,
 
   // We need to reserve a a spill slot if scavenging could potentially require
   // spilling a scavenged register.
-  if (!NewRegs.empty() && needToReserveScavengingSpillSlots(MF, HRI)) {
+  if (!NewRegs.empty()) {
+    MachineFrameInfo &MFI = *MF.getFrameInfo();
     MachineRegisterInfo &MRI = MF.getRegInfo();
     SetVector<const TargetRegisterClass*> SpillRCs;
+    // Reserve an int register in any case, because it could be used to hold
+    // the stack offset in case it does not fit into a spill instruction.
+    SpillRCs.insert(&Hexagon::IntRegsRegClass);
+
     for (unsigned VR : NewRegs)
       SpillRCs.insert(MRI.getRegClass(VR));
 
-    MachineFrameInfo &MFI = *MF.getFrameInfo();
-    const TargetRegisterClass &IntRC = Hexagon::IntRegsRegClass;
-    if (SpillRCs.count(&IntRC)) {
-      for (int i = 0; i < NumberScavengerSlots; i++) {
-        int NewFI = MFI.CreateSpillStackObject(IntRC.getSize(),
-                                               IntRC.getAlignment());
+    for (auto *RC : SpillRCs) {
+      if (!needToReserveScavengingSpillSlots(MF, HRI, RC))
+        continue;
+      unsigned Num = RC == &Hexagon::IntRegsRegClass ? NumberScavengerSlots : 1;
+      unsigned S = RC->getSize(), A = RC->getAlignment();
+      for (unsigned i = 0; i < Num; i++) {
+        int NewFI = MFI.CreateSpillStackObject(S, A);
         RS->addScavengingFrameIndex(NewFI);
       }
-    }
-    for (auto *RC : SpillRCs) {
-      if (RC == &IntRC)
-        continue;
-      int NewFI = MFI.CreateSpillStackObject(RC->getSize(), RC->getAlignment());
-      RS->addScavengingFrameIndex(NewFI);
     }
   }
 
@@ -1846,8 +1926,8 @@ void HexagonFrameLowering::optimizeSpillSlots(MachineFunction &MF,
 
     for (auto &In : B) {
       int LFI, SFI;
-      bool Load = HII.isLoadFromStackSlot(&In, LFI) && !HII.isPredicated(In);
-      bool Store = HII.isStoreToStackSlot(&In, SFI) && !HII.isPredicated(In);
+      bool Load = HII.isLoadFromStackSlot(In, LFI) && !HII.isPredicated(In);
+      bool Store = HII.isStoreToStackSlot(In, SFI) && !HII.isPredicated(In);
       if (Load && Store) {
         // If it's both a load and a store, then we won't handle it.
         BadFIs.insert(LFI);
@@ -2040,7 +2120,7 @@ void HexagonFrameLowering::optimizeSpillSlots(MachineFunction &MF,
         MachineBasicBlock::iterator StartIt = SI, NextIt;
         MachineInstr *CopyIn = nullptr;
         if (SrcRR.Reg != FoundR || SrcRR.Sub != 0) {
-          DebugLoc DL = SI->getDebugLoc();
+          const DebugLoc &DL = SI->getDebugLoc();
           CopyIn = BuildMI(B, StartIt, DL, HII.get(TargetOpcode::COPY), FoundR)
                       .addOperand(SrcOp);
         }
@@ -2066,7 +2146,7 @@ void HexagonFrameLowering::optimizeSpillSlots(MachineFunction &MF,
           MachineInstr *MI = &*It;
           NextIt = std::next(It);
           int TFI;
-          if (!HII.isLoadFromStackSlot(MI, TFI) || TFI != FI)
+          if (!HII.isLoadFromStackSlot(*MI, TFI) || TFI != FI)
             continue;
           unsigned DstR = MI->getOperand(0).getReg();
           assert(MI->getOperand(0).getSubReg() == 0);
@@ -2076,9 +2156,9 @@ void HexagonFrameLowering::optimizeSpillSlots(MachineFunction &MF,
             unsigned MemSize = (1U << (HII.getMemAccessSize(MI) - 1));
             assert(HII.getAddrMode(MI) == HexagonII::BaseImmOffset);
             unsigned CopyOpc = TargetOpcode::COPY;
-            if (HII.isSignExtendingLoad(MI))
+            if (HII.isSignExtendingLoad(*MI))
               CopyOpc = (MemSize == 1) ? Hexagon::A2_sxtb : Hexagon::A2_sxth;
-            else if (HII.isZeroExtendingLoad(MI))
+            else if (HII.isZeroExtendingLoad(*MI))
               CopyOpc = (MemSize == 1) ? Hexagon::A2_zxtb : Hexagon::A2_zxth;
             CopyOut = BuildMI(B, It, DL, HII.get(CopyOpc), DstR)
                         .addReg(FoundR, getKillRegState(MI == EI));

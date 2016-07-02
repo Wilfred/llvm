@@ -19,6 +19,9 @@ using namespace llvm;
 using namespace object;
 
 namespace {
+// FIXME: This class is only here to support the transition to llvm::Error. It
+// will be removed once this transition is complete. Clients should prefer to
+// deal with the Error value directly, rather than converting to error_code.
 class _object_error_category : public std::error_category {
 public:
   const char* name() const LLVM_NOEXCEPT override;
@@ -70,4 +73,22 @@ static ManagedStatic<_object_error_category> error_category;
 
 const std::error_category &object::object_category() {
   return *error_category;
+}
+
+llvm::Error llvm::object::isNotObjectErrorInvalidFileType(llvm::Error Err) {
+  if (auto Err2 =
+       handleErrors(std::move(Err),
+         [](std::unique_ptr<ECError> M) {
+           // Try to handle 'M'. If successful, return a success value from
+           // the handler.
+           if (M->convertToErrorCode() == object_error::invalid_file_type)
+             return Error::success();
+
+           // We failed to handle 'M' - return it from the handler.
+           // This value will be passed back from catchErrors and
+           // wind up in Err2, where it will be returned from this function.
+           return Error(std::move(M));
+         }))
+    return Err2;
+  return Err;
 }

@@ -18,6 +18,9 @@ namespace object {
 class COFFImportFile;
 class ObjectFile;
 }
+namespace codeview {
+class MemoryTypeTableBuilder;
+}
 
 class ScopedPrinter;
 
@@ -59,7 +62,10 @@ public:
   virtual void printCOFFExports() { }
   virtual void printCOFFDirectives() { }
   virtual void printCOFFBaseReloc() { }
+  virtual void printCOFFDebugDirectory() { }
   virtual void printCodeViewDebugInfo() { }
+  virtual void
+  mergeCodeViewTypes(llvm::codeview::MemoryTypeTableBuilder &CVTypes) {}
 
   // Only implemented for MachO.
   virtual void printMachODataInCode() { }
@@ -88,6 +94,9 @@ std::error_code createMachODumper(const object::ObjectFile *Obj,
                                   std::unique_ptr<ObjDumper> &Result);
 
 void dumpCOFFImportFile(const object::COFFImportFile *File);
+
+void dumpCodeViewMergedTypes(ScopedPrinter &Writer,
+                             llvm::codeview::MemoryTypeTableBuilder &CVTypes);
 
 } // namespace llvm
 

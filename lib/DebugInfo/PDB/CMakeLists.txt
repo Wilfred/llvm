@@ -28,8 +28,10 @@ if(HAVE_DIA_SDK)
 endif()
 
 add_pdb_impl_folder(Raw
-  Raw/ByteStream.cpp
   Raw/DbiStream.cpp
+  Raw/EnumTables.cpp
+  Raw/Hash.cpp
+  Raw/IndexedStreamData.cpp
   Raw/InfoStream.cpp
   Raw/MappedBlockStream.cpp
   Raw/ModInfo.cpp
@@ -37,11 +39,13 @@ add_pdb_impl_folder(Raw
   Raw/NameHashTable.cpp
   Raw/NameMap.cpp
   Raw/PDBFile.cpp
+  Raw/PublicsStream.cpp
   Raw/RawError.cpp
   Raw/RawSession.cpp
-  Raw/StreamReader.cpp
+  Raw/SymbolStream.cpp
   Raw/TpiStream.cpp)
 
+list(APPEND LIBPDB_ADDITIONAL_HEADER_DIRS "${LLVM_MAIN_INCLUDE_DIR}/llvm/DebugInfo/PDB/Raw")
 list(APPEND LIBPDB_ADDITIONAL_HEADER_DIRS "${LLVM_MAIN_INCLUDE_DIR}/llvm/DebugInfo/PDB")
 
 add_llvm_library(LLVMDebugInfoPDB

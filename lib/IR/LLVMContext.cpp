@@ -134,6 +134,10 @@ LLVMContext::LLVMContext() : pImpl(new LLVMContextImpl(*this)) {
   assert(LoopID == MD_loop && "llvm.loop kind id drifted");
   (void)LoopID;
 
+  unsigned TypeID = getMDKindID("type");
+  assert(TypeID == MD_type && "type kind id drifted");
+  (void)TypeID;
+
   auto *DeoptEntry = pImpl->getOrInsertBundleTag("deopt");
   assert(DeoptEntry->second == LLVMContext::OB_deopt &&
          "deopt operand bundle id drifted!");
@@ -231,7 +235,8 @@ static bool isDiagnosticEnabled(const DiagnosticInfo &DI) {
   return true;
 }
 
-static const char *getDiagnosticMessagePrefix(DiagnosticSeverity Severity) {
+const char *
+LLVMContext::getDiagnosticMessagePrefix(DiagnosticSeverity Severity) {
   switch (Severity) {
   case DS_Error:
     return "error";

@@ -16,11 +16,13 @@
 
 #include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/CFLAliasAnalysis.h"
+#include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/ScopedNoAliasAA.h"
 #include "llvm/Analysis/TypeBasedAliasAnalysis.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/RegAllocRegistry.h"
+#include "llvm/CodeGen/RegisterUsageInfo.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
@@ -111,6 +113,10 @@ static cl::opt<bool> EarlyLiveIntervals("early-live-intervals", cl::Hidden,
 static cl::opt<bool> UseCFLAA("use-cfl-aa-in-codegen",
   cl::init(false), cl::Hidden,
   cl::desc("Enable the new, experimental CFL alias analysis in CodeGen"));
+
+cl::opt<bool> UseIPRA("enable-ipra", cl::init(false), cl::Hidden,
+                      cl::desc("Enable interprocedural register allocation "
+                               "to reduce load/store at procedure calls."));
 
 /// Allow standard passes to be disabled by command line options. This supports
 /// simple binary flags that either suppress the pass or do nothing.
@@ -312,6 +318,13 @@ IdentifyingPassPtr TargetPassConfig::getPassSubstitution(AnalysisID ID) const {
   return I->second;
 }
 
+bool TargetPassConfig::isPassSubstitutedOrOverridden(AnalysisID ID) const {
+  IdentifyingPassPtr TargetID = getPassSubstitution(ID);
+  IdentifyingPassPtr FinalPtr = overridePass(ID, TargetID);
+  return !FinalPtr.isValid() || FinalPtr.isInstance() ||
+      FinalPtr.getID() != ID;
+}
+
 /// Add a pass to the PassManager if that pass is supposed to be run.  If the
 /// Started/Stopped flags indicate either that the compilation should start at
 /// a later pass or that it should stop after an earlier pass, then do not add
@@ -485,6 +498,10 @@ void TargetPassConfig::addCodeGenPrepare() {
 void TargetPassConfig::addISelPrepare() {
   addPreISel();
 
+  // Force codegen to run according to the callgraph.
+  if (UseIPRA)
+    addPass(new DummyCGSCCPass);
+
   // Add both the safe stack and the stack protection passes: each of them will
   // only protect functions that have corresponding attributes.
   addPass(createSafeStackPass(TM));
@@ -520,6 +537,9 @@ void TargetPassConfig::addISelPrepare() {
 /// before/after any target-independent pass. But it's currently overkill.
 void TargetPassConfig::addMachinePasses() {
   AddingMachinePasses = true;
+
+  if (UseIPRA)
+    addPass(createRegUsageInfoPropPass());
 
   // Insert a machine instr printer pass after the specified pass.
   if (!StringRef(PrintMachineInstrs.getValue()).equals("") &&
@@ -565,7 +585,10 @@ void TargetPassConfig::addMachinePasses() {
   if (getOptLevel() != CodeGenOpt::None)
     addPass(&ShrinkWrapID);
 
-  addPass(&PrologEpilogCodeInserterID);
+  // Prolog/Epilog inserter needs a TargetMachine to instantiate. But only
+  // do so if it hasn't been disabled, substituted, or overridden.
+  if (!isPassSubstitutedOrOverridden(&PrologEpilogCodeInserterID))
+      addPass(createPrologEpilogInserterPass(TM));
 
   /// Add passes that optimize machine instructions after register allocation.
   if (getOptLevel() != CodeGenOpt::None)
@@ -602,6 +625,11 @@ void TargetPassConfig::addMachinePasses() {
     addBlockPlacement();
 
   addPreEmitPass();
+
+  if (UseIPRA)
+    // Collect register usage information and produce a register mask of
+    // clobbered registers, to be used to optimize call sites.
+    addPass(createRegUsageInfoCollector());
 
   addPass(&FuncletLayoutID, false);
 
@@ -765,6 +793,11 @@ void TargetPassConfig::addOptimizedRegAlloc(FunctionPass *RegAllocPass) {
   addPass(&TwoAddressInstructionPassID, false);
   addPass(&RegisterCoalescerID);
 
+  // The machine scheduler may accidentally create disconnected components
+  // when moving subregister definitions around, avoid this by splitting them to
+  // separate vregs before. Splitting can also improve reg. allocation quality.
+  addPass(&RenameIndependentSubregsID);
+
   // PreRA instruction scheduling.
   addPass(&MachineSchedulerID);
 
@@ -819,7 +852,7 @@ bool TargetPassConfig::addGCPasses() {
 
 /// Add standard basic block placement passes.
 void TargetPassConfig::addBlockPlacement() {
-  if (addPass(&MachineBlockPlacementID, false)) {
+  if (addPass(&MachineBlockPlacementID)) {
     // Run a separate pass to collect block placement statistics.
     if (EnableBlockPlacementStats)
       addPass(&MachineBlockPlacementStatsID);
